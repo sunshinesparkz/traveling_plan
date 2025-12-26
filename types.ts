@@ -15,3 +15,7 @@ export interface AiSuggestionParams {
   style: string; // e.g., ติดทะเล, ปาร์ตี้, สงบ
   people: string;
 }
+
+export interface TripDetails extends AiSuggestionParams {
+  title?: string; // Optional trip title
+}

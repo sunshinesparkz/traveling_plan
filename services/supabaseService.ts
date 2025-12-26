@@ -1,5 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
-import { Accommodation } from '../types';
+import { Accommodation, TripDetails } from '../types';
 
 // process.env is defined in vite.config.ts
 declare const process: any;
@@ -13,12 +13,15 @@ export const supabase = isSupabaseConfigured
   ? createClient(supabaseUrl, supabaseKey) 
   : null;
 
-export const createTrip = async (places: Accommodation[]) => {
+export const createTrip = async (places: Accommodation[], tripDetails: TripDetails | null) => {
   if (!supabase) throw new Error("Supabase is not configured");
 
   const { data, error } = await supabase
     .from('trips')
-    .insert([{ places }])
+    .insert([{ 
+      places, 
+      trip_details: tripDetails || {} 
+    }])
     .select()
     .single();
 
@@ -26,12 +29,16 @@ export const createTrip = async (places: Accommodation[]) => {
   return data;
 };
 
-export const updateTrip = async (id: string, places: Accommodation[]) => {
+export const updateTrip = async (id: string, places: Accommodation[], tripDetails: TripDetails | null) => {
   if (!supabase) throw new Error("Supabase is not configured");
 
   const { error } = await supabase
     .from('trips')
-    .update({ places, updated_at: new Date().toISOString() })
+    .update({ 
+      places, 
+      trip_details: tripDetails || {},
+      updated_at: new Date().toISOString() 
+    })
     .eq('id', id);
 
   if (error) throw error;

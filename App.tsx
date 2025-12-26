@@ -5,12 +5,14 @@ import AddForm from './components/AddForm';
 import AiModal from './components/AiModal';
 import WelcomeScreen from './components/WelcomeScreen';
 import ShareModal from './components/ShareModal';
-import { Accommodation, AiSuggestionParams } from './types';
+import { Accommodation, AiSuggestionParams, TripDetails } from './types';
 import { getAccommodationSuggestions } from './services/geminiService';
 import { getTrip, updateTrip, isSupabaseConfigured } from './services/supabaseService';
 
 const App: React.FC = () => {
   const [places, setPlaces] = useState<Accommodation[]>([]);
+  const [tripDetails, setTripDetails] = useState<TripDetails | null>(null);
+  
   const [showAddForm, setShowAddForm] = useState(false);
   const [showAiModal, setShowAiModal] = useState(false);
   const [showShareModal, setShowShareModal] = useState(false);
@@ -29,12 +31,21 @@ const App: React.FC = () => {
       loadCloudTrip(urlTripId);
     } else {
       // Load from local storage only if no Trip ID in URL
-      const saved = localStorage.getItem('kohlarn-places');
-      if (saved) {
+      const savedPlaces = localStorage.getItem('kohlarn-places');
+      const savedDetails = localStorage.getItem('kohlarn-details');
+      
+      if (savedPlaces) {
         try {
-          setPlaces(JSON.parse(saved));
+          setPlaces(JSON.parse(savedPlaces));
         } catch (e) {
           console.error("Failed to parse saved places");
+        }
+      }
+      if (savedDetails) {
+        try {
+          setTripDetails(JSON.parse(savedDetails));
+        } catch (e) {
+          console.error("Failed to parse saved details");
         }
       }
     }
@@ -45,8 +56,9 @@ const App: React.FC = () => {
     setIsSyncing(true);
     try {
       const data = await getTrip(id);
-      if (data && data.places) {
-        setPlaces(data.places);
+      if (data) {
+        if (data.places) setPlaces(data.places);
+        if (data.trip_details) setTripDetails(data.trip_details);
       }
     } catch (error) {
       console.error("Error loading trip:", error);
@@ -63,7 +75,7 @@ const App: React.FC = () => {
       const timer = setTimeout(async () => {
         setIsSyncing(true);
         try {
-          await updateTrip(tripId, places);
+          await updateTrip(tripId, places, tripDetails);
         } catch (error) {
           console.error("Sync failed:", error);
         } finally {
@@ -76,11 +88,14 @@ const App: React.FC = () => {
       // If local mode, save to localStorage
       try {
         localStorage.setItem('kohlarn-places', JSON.stringify(places));
+        if (tripDetails) {
+          localStorage.setItem('kohlarn-details', JSON.stringify(tripDetails));
+        }
       } catch (error) {
          // Quota error handling
       }
     }
-  }, [places, tripId]);
+  }, [places, tripDetails, tripId]);
 
   const handleTripCreated = (newId: string) => {
     setTripId(newId);
@@ -110,7 +125,11 @@ const App: React.FC = () => {
     if (places.length === 0) return;
     if (window.confirm('⚠️ คำเตือน: คุณต้องการลบข้อมูลที่พัก "ทั้งหมด" ใช่หรือไม่?')) {
       setPlaces([]);
-      if (!tripId) localStorage.removeItem('kohlarn-places');
+      setTripDetails(null);
+      if (!tripId) {
+        localStorage.removeItem('kohlarn-places');
+        localStorage.removeItem('kohlarn-details');
+      }
     }
   };
 
@@ -122,6 +141,9 @@ const App: React.FC = () => {
 
   const handleAiSearch = async (params: AiSuggestionParams) => {
     setIsAiLoading(true);
+    // Save the search parameters as trip details
+    setTripDetails(params);
+    
     try {
       const suggestions = await getAccommodationSuggestions(params);
       suggestions.forEach(s => handleAddPlace(s, 'ai'));
@@ -205,6 +227,23 @@ const App: React.FC = () => {
           </div>
         )}
 
+        {/* Info Banner when Trip Details exist */}
+        {tripDetails && places.length > 0 && (
+          <div className="mb-6 bg-gradient-to-r from-purple-50 to-indigo-50 border border-purple-100 p-4 rounded-xl flex flex-wrap gap-4 items-center justify-between animate-fade-in-down">
+            <div className="flex items-center gap-3 text-sm text-purple-900">
+               <span className="flex items-center gap-1 bg-white px-2 py-1 rounded shadow-sm"><Sparkles size={14} className="text-yellow-500"/> สไตล์: {tripDetails.style}</span>
+               <span className="flex items-center gap-1 bg-white px-2 py-1 rounded shadow-sm">👥 {tripDetails.people} คน</span>
+               <span className="flex items-center gap-1 bg-white px-2 py-1 rounded shadow-sm">💰 ~{tripDetails.budget} บาท/คืน</span>
+            </div>
+            <button 
+               onClick={() => setShowAiModal(true)}
+               className="text-xs text-indigo-600 hover:text-indigo-800 underline font-medium"
+            >
+              แก้ไขความต้องการ
+            </button>
+          </div>
+        )}
+
         {/* Action Buttons (Visible when there are items) */}
         {places.length > 0 && !showAddForm && (
           <div className="flex gap-3 mb-8 overflow-x-auto pb-2 scrollbar-hide">
@@ -218,7 +257,7 @@ const App: React.FC = () => {
               onClick={() => setShowAiModal(true)}
               className="flex-1 sm:flex-none bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 text-white px-5 py-3 rounded-xl font-semibold shadow-md transition-all flex items-center justify-center gap-2 whitespace-nowrap"
             >
-              <Sparkles size={18} className="text-yellow-200" /> ให้ AI ช่วยแนะนำ
+              <Sparkles size={18} className="text-yellow-200" /> ให้ AI ช่วยแนะนำเพิ่ม
             </button>
           </div>
         )}
@@ -255,6 +294,7 @@ const App: React.FC = () => {
         isOpen={showShareModal}
         onClose={() => setShowShareModal(false)}
         places={places}
+        tripDetails={tripDetails}
         currentTripId={tripId}
         onTripCreated={handleTripCreated}
       />

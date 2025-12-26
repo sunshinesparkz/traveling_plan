@@ -1,17 +1,18 @@
 import React, { useState } from 'react';
 import { X, Cloud, Link as LinkIcon, Download, Check, AlertTriangle } from 'lucide-react';
-import { Accommodation } from '../types';
+import { Accommodation, TripDetails } from '../types';
 import { isSupabaseConfigured, createTrip } from '../services/supabaseService';
 
 interface ShareModalProps {
   isOpen: boolean;
   onClose: () => void;
   places: Accommodation[];
+  tripDetails: TripDetails | null;
   currentTripId: string | null;
   onTripCreated: (id: string) => void;
 }
 
-const ShareModal: React.FC<ShareModalProps> = ({ isOpen, onClose, places, currentTripId, onTripCreated }) => {
+const ShareModal: React.FC<ShareModalProps> = ({ isOpen, onClose, places, tripDetails, currentTripId, onTripCreated }) => {
   const [isCreating, setIsCreating] = useState(false);
   const [copySuccess, setCopySuccess] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -26,7 +27,7 @@ const ShareModal: React.FC<ShareModalProps> = ({ isOpen, onClose, places, curren
         throw new Error("ยังไม่ได้ตั้งค่า Database (Supabase Keys)");
       }
       
-      const data = await createTrip(places);
+      const data = await createTrip(places, tripDetails);
       if (data && data.id) {
         onTripCreated(data.id);
       }
@@ -47,7 +48,13 @@ const ShareModal: React.FC<ShareModalProps> = ({ isOpen, onClose, places, curren
   };
 
   const handleDownloadJson = () => {
-    const dataStr = JSON.stringify(places, null, 2);
+    const exportData = {
+      places,
+      details: tripDetails,
+      exportDate: new Date().toISOString()
+    };
+    
+    const dataStr = JSON.stringify(exportData, null, 2);
     const blob = new Blob([dataStr], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
