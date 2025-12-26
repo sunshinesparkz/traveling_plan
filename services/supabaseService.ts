@@ -178,17 +178,19 @@ export const createTrip = async (places: Accommodation[], tripDetails: TripDetai
 export const updateTrip = async (id: string, places: Accommodation[], tripDetails: TripDetails | null) => {
   checkSupabase();
   
-  // Try to link user if not linked yet (optional enhancement)
+  // Try to link user if not linked yet
   const user = await getCurrentUser();
+  
   const updatePayload: any = {
     places, 
     trip_details: tripDetails || {},
     updated_at: new Date().toISOString() 
   };
 
-  // Only attempt to add user_id if we have one. 
-  // Note: If RLS prevents update, this might fail if not owner.
-  // We assume simple public/anon usage or owner based RLS.
+  // IMPORTANT: Explicitly set user_id to claim ownership if logged in
+  if (user) {
+    updatePayload.user_id = user.id;
+  }
 
   const { error } = await supabase!
     .from('trips')

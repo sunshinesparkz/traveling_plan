@@ -393,6 +393,19 @@ const App: React.FC = () => {
     if (!user) return '';
     return user.user_metadata?.username || user.email?.split('@')[0] || 'นักเดินทาง';
   };
+  
+  const handleAuthSuccess = () => {
+    setShowAuthModal(false);
+    alert("ยินดีต้อนรับกลับ!");
+    // Sync current trip to account immediately
+    if (tripId) {
+        setIsSyncing(true);
+        updateTrip(tripId, places, tripDetails)
+            .then(() => console.log("Trip synced to user account"))
+            .catch(err => console.error("Failed to sync trip on login", err))
+            .finally(() => setIsSyncing(false));
+    }
+  };
 
   if (!isSupabaseConfigured) {
       return <DatabaseConfigScreen onConfigured={() => window.location.reload()} />;
@@ -635,10 +648,7 @@ const App: React.FC = () => {
       <AuthModal 
         isOpen={showAuthModal}
         onClose={() => setShowAuthModal(false)}
-        onAuthSuccess={() => {
-            setShowAuthModal(false);
-            alert("ยินดีต้อนรับกลับ!");
-        }}
+        onAuthSuccess={handleAuthSuccess}
       />
     </div>
   );
