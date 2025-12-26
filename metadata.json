@@ -1,0 +1,5 @@
+{
+  "name": "Koh Larn Trip Planner",
+  "description": "แอปพลิเคชันช่วยเลือกที่พักเกาะล้านสำหรับกลุ่มเพื่อน สามารถจดบันทึก โหวต และให้ AI ช่วยแนะนำที่พักได้",
+  "requestFramePermissions": []
+}
