@@ -56,3 +56,26 @@ export const getTrip = async (id: string) => {
   if (error) throw error;
   return data;
 };
+
+// New: Subscribe to changes for a specific trip
+export const subscribeToTrip = (tripId: string, onUpdate: (payload: any) => void) => {
+  if (!supabase) return null;
+
+  const channel = supabase
+    .channel(`trip-${tripId}`)
+    .on(
+      'postgres_changes',
+      {
+        event: 'UPDATE',
+        schema: 'public',
+        table: 'trips',
+        filter: `id=eq.${tripId}`,
+      },
+      (payload) => {
+        onUpdate(payload.new);
+      }
+    )
+    .subscribe();
+
+  return channel;
+};

@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { Plus, Sparkles, MapPin, Anchor, Trash2, Share2, CloudLightning, Loader2 } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { Plus, Sparkles, MapPin, Anchor, Trash2, Share2, CloudLightning, Loader2, Save } from 'lucide-react';
 import PlaceCard from './components/PlaceCard';
 import AddForm from './components/AddForm';
 import AiModal from './components/AiModal';
@@ -7,7 +7,7 @@ import WelcomeScreen from './components/WelcomeScreen';
 import ShareModal from './components/ShareModal';
 import { Accommodation, AiSuggestionParams, TripDetails } from './types';
 import { getAccommodationSuggestions } from './services/geminiService';
-import { getTrip, updateTrip, isSupabaseConfigured } from './services/supabaseService';
+import { getTrip, updateTrip, subscribeToTrip, isSupabaseConfigured, supabase } from './services/supabaseService';
 
 const App: React.FC = () => {
   const [places, setPlaces] = useState<Accommodation[]>([]);
@@ -21,8 +21,11 @@ const App: React.FC = () => {
   
   const [tripId, setTripId] = useState<string | null>(null);
   const [isSyncing, setIsSyncing] = useState(false);
-  const [isCloudLoaded, setIsCloudLoaded] = useState(false); // New: Prevents overwriting cloud data on initial load
-  const [isLoadingTrip, setIsLoadingTrip] = useState(false); // New: Shows loading spinner for trip data
+  const [isCloudLoaded, setIsCloudLoaded] = useState(false); 
+  const [isLoadingTrip, setIsLoadingTrip] = useState(false);
+
+  // Ref to track if the last update came from the server to prevent echo loops
+  const lastServerUpdate = useRef<number>(0);
 
   // Parse URL query params on mount
   useEffect(() => {
@@ -34,33 +37,40 @@ const App: React.FC = () => {
       setHasStarted(true);
       loadCloudTrip(urlTripId);
     } else {
-      // Local mode: Load from local storage
-      // We set isCloudLoaded to true immediately because we aren't waiting for cloud data
       setIsCloudLoaded(true); 
-      
       const savedPlaces = localStorage.getItem('kohlarn-places');
       const savedDetails = localStorage.getItem('kohlarn-details');
       
       if (savedPlaces) {
-        try {
-          setPlaces(JSON.parse(savedPlaces));
-        } catch (e) {
-          console.error("Failed to parse saved places");
-        }
+        try { setPlaces(JSON.parse(savedPlaces)); } catch (e) { console.error(e); }
       }
       if (savedDetails) {
-        try {
-          setTripDetails(JSON.parse(savedDetails));
-        } catch (e) {
-          console.error("Failed to parse saved details");
-        }
+        try { setTripDetails(JSON.parse(savedDetails)); } catch (e) { console.error(e); }
       }
     }
   }, []);
 
+  // Realtime Subscription Effect
+  useEffect(() => {
+    if (!tripId || !isSupabaseConfigured) return;
+
+    const channel = subscribeToTrip(tripId, (newData) => {
+      // Mark that we just received an update from server
+      lastServerUpdate.current = Date.now();
+      
+      console.log("Received realtime update:", newData);
+      if (newData.places) setPlaces(newData.places);
+      if (newData.trip_details) setTripDetails(newData.trip_details);
+    });
+
+    return () => {
+      if (channel) supabase?.removeChannel(channel);
+    };
+  }, [tripId]);
+
   const loadCloudTrip = async (id: string) => {
     if (!isSupabaseConfigured) {
-      setIsCloudLoaded(true); // Fallback to allow local editing
+      setIsCloudLoaded(true);
       return;
     }
     
@@ -76,18 +86,18 @@ const App: React.FC = () => {
       alert("ไม่สามารถโหลดข้อมูลทริปได้ หรือลิงก์ไม่ถูกต้อง");
     } finally {
       setIsLoadingTrip(false);
-      // CRITICAL: Only allow syncing AFTER we have finished loading
       setIsCloudLoaded(true); 
     }
   };
 
-  // Sync Logic
+  // Sync Logic (Push to Server)
   useEffect(() => {
-    // Only sync if:
-    // 1. We have a tripId (Cloud mode)
-    // 2. Supabase is configured
-    // 3. Cloud data has finished loading (Prevention of race condition)
     if (tripId && isSupabaseConfigured && isCloudLoaded) {
+      // Check if we recently received an update from server to avoid infinite loop
+      if (Date.now() - lastServerUpdate.current < 1000) {
+        return; 
+      }
+
       const timer = setTimeout(async () => {
         setIsSyncing(true);
         try {
@@ -102,25 +112,20 @@ const App: React.FC = () => {
       return () => clearTimeout(timer);
     } 
     
-    // Local Storage Logic (Only if NOT in cloud mode)
+    // Local Storage Logic
     if (!tripId && isCloudLoaded) {
       try {
         localStorage.setItem('kohlarn-places', JSON.stringify(places));
         if (tripDetails) {
           localStorage.setItem('kohlarn-details', JSON.stringify(tripDetails));
         }
-      } catch (error) {
-         // Quota error handling
-      }
+      } catch (error) {}
     }
   }, [places, tripDetails, tripId, isCloudLoaded]);
 
   const handleTripCreated = (newId: string) => {
     setTripId(newId);
-    // Since we just created it, we are "loaded" and in sync
     setIsCloudLoaded(true); 
-    
-    // Update URL without reload
     const newUrl = `${window.location.pathname}?tripId=${newId}`;
     window.history.pushState({ path: newUrl }, '', newUrl);
   };
@@ -176,6 +181,20 @@ const App: React.FC = () => {
     }
   };
 
+  // Manual Save Function
+  const handleManualSave = async () => {
+    if (!tripId || !isSupabaseConfigured) return;
+    setIsSyncing(true);
+    try {
+      await updateTrip(tripId, places, tripDetails);
+      alert("บันทึกข้อมูลเรียบร้อยแล้ว");
+    } catch (error) {
+      alert("การบันทึกข้อมูลล้มเหลว กรุณาลองใหม่อีกครั้ง");
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
   if (isLoadingTrip) {
     return (
       <div className="fixed inset-0 bg-slate-50 flex flex-col items-center justify-center z-50">
@@ -199,9 +218,16 @@ const App: React.FC = () => {
             <div className="flex flex-col">
               <h1 className="text-xl sm:text-2xl font-bold tracking-tight leading-none">Koh Larn Planner</h1>
               {tripId && (
-                <span className="text-xs text-teal-500 font-medium flex items-center gap-1 animate-pulse">
-                   <CloudLightning size={12} /> {isSyncing ? 'กำลังซิงค์...' : 'ออนไลน์'}
-                </span>
+                 <div className="flex items-center gap-2">
+                    <span className={`text-xs font-medium flex items-center gap-1 ${isSyncing ? 'text-amber-500' : 'text-teal-500'}`}>
+                      <CloudLightning size={12} /> {isSyncing ? 'กำลังบันทึก...' : 'บันทึกแล้ว'}
+                    </span>
+                    {!isSyncing && (
+                      <button onClick={handleManualSave} title="บันทึกทันที" className="text-slate-400 hover:text-teal-600">
+                        <Save size={14} />
+                      </button>
+                    )}
+                 </div>
               )}
             </div>
           </div>
