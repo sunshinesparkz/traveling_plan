@@ -10,9 +10,12 @@ const getSupabaseConfig = () => {
   let envKey = '';
 
   // 1. Try Vite standard import.meta.env
-  if (typeof import.meta !== 'undefined' && import.meta.env) {
-    envUrl = import.meta.env.VITE_SUPABASE_URL || '';
-    envKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
+  // Use 'as any' to avoid TS error: Property 'env' does not exist on type 'ImportMeta'
+  const meta = import.meta as any;
+  
+  if (typeof meta !== 'undefined' && meta.env) {
+    envUrl = meta.env.VITE_SUPABASE_URL || '';
+    envKey = meta.env.VITE_SUPABASE_ANON_KEY || '';
   }
 
   // 2. Try process.env
