@@ -1,24 +1,13 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Plus, Sparkles, MapPin, Anchor, Trash2, Share2, CloudLightning, Loader2, Save, LogOut, User } from 'lucide-react';
+import { Plus, Sparkles, MapPin, Anchor, Trash2, Share2, CloudLightning, Loader2, Save } from 'lucide-react';
 import PlaceCard from './components/PlaceCard';
 import AddForm from './components/AddForm';
 import AiModal from './components/AiModal';
 import WelcomeScreen from './components/WelcomeScreen';
 import ShareModal from './components/ShareModal';
-import AuthScreen from './components/AuthScreen';
 import { Accommodation, AiSuggestionParams, TripDetails } from './types';
 import { getAccommodationSuggestions } from './services/geminiService';
-import { 
-  getTrip, 
-  updateTrip, 
-  subscribeToTrip, 
-  isSupabaseConfigured, 
-  supabase, 
-  getCurrentUser,
-  getUserLatestTrip,
-  createTrip,
-  signOut
-} from './services/supabaseService';
+import { getTrip, updateTrip, subscribeToTrip, isSupabaseConfigured, supabase } from './services/supabaseService';
 
 const App: React.FC = () => {
   const [places, setPlaces] = useState<Accommodation[]>([]);
@@ -27,8 +16,6 @@ const App: React.FC = () => {
   const [showAddForm, setShowAddForm] = useState(false);
   const [showAiModal, setShowAiModal] = useState(false);
   const [showShareModal, setShowShareModal] = useState(false);
-  const [showAuthScreen, setShowAuthScreen] = useState(false);
-  
   const [isAiLoading, setIsAiLoading] = useState(false);
   const [hasStarted, setHasStarted] = useState(false);
   
@@ -36,100 +23,32 @@ const App: React.FC = () => {
   const [isSyncing, setIsSyncing] = useState(false);
   const [isCloudLoaded, setIsCloudLoaded] = useState(false); 
   const [isLoadingTrip, setIsLoadingTrip] = useState(false);
-  const [user, setUser] = useState<any>(null);
 
   // Ref to track if the last update came from the server to prevent echo loops
   const lastServerUpdate = useRef<number>(0);
 
-  // Check Auth State on Mount
+  // Parse URL query params on mount
   useEffect(() => {
-    const checkUser = async () => {
-      const currentUser = await getCurrentUser();
-      setUser(currentUser);
-      
-      // Listen for auth changes
-      const { data: { subscription } } = supabase?.auth.onAuthStateChange((_event, session) => {
-        setUser(session?.user ?? null);
-      }) || { data: { subscription: null } };
-
-      return () => subscription?.unsubscribe();
-    };
+    const params = new URLSearchParams(window.location.search);
+    const urlTripId = params.get('tripId');
     
-    if (isSupabaseConfigured) checkUser();
-  }, []);
-
-  // Initialization Logic
-  useEffect(() => {
-    const init = async () => {
-      const params = new URLSearchParams(window.location.search);
-      const urlTripId = params.get('tripId');
+    if (urlTripId) {
+      setTripId(urlTripId);
+      setHasStarted(true);
+      loadCloudTrip(urlTripId);
+    } else {
+      setIsCloudLoaded(true); 
+      const savedPlaces = localStorage.getItem('kohlarn-places');
+      const savedDetails = localStorage.getItem('kohlarn-details');
       
-      // 1. If User is Logged In
-      if (user) {
-        setHasStarted(true);
-        setIsLoadingTrip(true);
-        
-        try {
-          // If URL has tripId, load that specific trip
-          if (urlTripId) {
-            setTripId(urlTripId);
-            await loadCloudTrip(urlTripId);
-          } else {
-             // If no URL tripId, try to find user's latest trip
-             const userTrip = await getUserLatestTrip(user.id);
-             if (userTrip) {
-               setTripId(userTrip.id);
-               setPlaces(userTrip.places || []);
-               setTripDetails(userTrip.trip_details || null);
-               // Update URL without reload
-               const newUrl = `${window.location.pathname}?tripId=${userTrip.id}`;
-               window.history.pushState({ path: newUrl }, '', newUrl);
-             } else {
-               // User logged in but has no trips yet. 
-               // Check if there is local data to migrate.
-               const savedPlaces = localStorage.getItem('kohlarn-places');
-               if (savedPlaces) {
-                  // Migration Logic happens in handleAuthSuccess usually, 
-                  // but handled here for persistent login state
-                  loadLocalData();
-               }
-             }
-          }
-        } catch (e) {
-          console.error("Error loading user data", e);
-        } finally {
-          setIsLoadingTrip(false);
-          setIsCloudLoaded(true);
-        }
-      } 
-      // 2. If Guest (No User)
-      else {
-        if (urlTripId) {
-          setTripId(urlTripId);
-          setHasStarted(true);
-          loadCloudTrip(urlTripId);
-        } else {
-          // Load local data
-          loadLocalData();
-          setIsCloudLoaded(true);
-        }
+      if (savedPlaces) {
+        try { setPlaces(JSON.parse(savedPlaces)); } catch (e) { console.error(e); }
       }
-    };
-
-    init();
-  }, [user]);
-
-  const loadLocalData = () => {
-    const savedPlaces = localStorage.getItem('kohlarn-places');
-    const savedDetails = localStorage.getItem('kohlarn-details');
-    
-    if (savedPlaces) {
-      try { setPlaces(JSON.parse(savedPlaces)); } catch (e) { console.error(e); }
+      if (savedDetails) {
+        try { setTripDetails(JSON.parse(savedDetails)); } catch (e) { console.error(e); }
+      }
     }
-    if (savedDetails) {
-      try { setTripDetails(JSON.parse(savedDetails)); } catch (e) { console.error(e); }
-    }
-  };
+  }, []);
 
   // Realtime Subscription Effect
   useEffect(() => {
@@ -150,8 +69,12 @@ const App: React.FC = () => {
   }, [tripId]);
 
   const loadCloudTrip = async (id: string) => {
-    if (!isSupabaseConfigured) return;
+    if (!isSupabaseConfigured) {
+      setIsCloudLoaded(true);
+      return;
+    }
     
+    setIsLoadingTrip(true);
     try {
       const data = await getTrip(id);
       if (data) {
@@ -161,12 +84,14 @@ const App: React.FC = () => {
     } catch (error) {
       console.error("Error loading trip:", error);
       alert("ไม่สามารถโหลดข้อมูลทริปได้ หรือลิงก์ไม่ถูกต้อง");
+    } finally {
+      setIsLoadingTrip(false);
+      setIsCloudLoaded(true); 
     }
   };
 
   // Sync Logic (Push to Server)
   useEffect(() => {
-    // Only auto-sync if we have a tripId (User is owner or viewing cloud trip)
     if (tripId && isSupabaseConfigured && isCloudLoaded) {
       // Check if we recently received an update from server to avoid infinite loop
       if (Date.now() - lastServerUpdate.current < 1000) {
@@ -187,8 +112,8 @@ const App: React.FC = () => {
       return () => clearTimeout(timer);
     } 
     
-    // Local Storage Logic (Only if NOT in cloud mode)
-    if (!tripId && isCloudLoaded && !user) {
+    // Local Storage Logic
+    if (!tripId && isCloudLoaded) {
       try {
         localStorage.setItem('kohlarn-places', JSON.stringify(places));
         if (tripDetails) {
@@ -196,55 +121,13 @@ const App: React.FC = () => {
         }
       } catch (error) {}
     }
-  }, [places, tripDetails, tripId, isCloudLoaded, user]);
+  }, [places, tripDetails, tripId, isCloudLoaded]);
 
   const handleTripCreated = (newId: string) => {
     setTripId(newId);
     setIsCloudLoaded(true); 
     const newUrl = `${window.location.pathname}?tripId=${newId}`;
     window.history.pushState({ path: newUrl }, '', newUrl);
-  };
-
-  const handleAuthSuccess = async () => {
-    setShowAuthScreen(false);
-    setHasStarted(true);
-    const currentUser = await getCurrentUser();
-    setUser(currentUser);
-
-    // MIGRATION LOGIC:
-    // If the user just logged in and has local data (places > 0) but no tripId yet,
-    // we should create a new trip for them on the cloud with this data.
-    if (places.length > 0 && !tripId) {
-      setIsSyncing(true);
-      try {
-        const newTrip = await createTrip(places, tripDetails);
-        if (newTrip) {
-          setTripId(newTrip.id);
-          const newUrl = `${window.location.pathname}?tripId=${newTrip.id}`;
-          window.history.pushState({ path: newUrl }, '', newUrl);
-          
-          // Clear local storage after successful cloud sync
-          localStorage.removeItem('kohlarn-places');
-          localStorage.removeItem('kohlarn-details');
-          alert("ข้อมูลของคุณถูกบันทึกขึ้น Cloud เรียบร้อยแล้ว!");
-        }
-      } catch (e) {
-        console.error("Failed to migrate data", e);
-      } finally {
-        setIsSyncing(false);
-      }
-    }
-  };
-
-  const handleLogout = async () => {
-    await signOut();
-    setUser(null);
-    setTripId(null);
-    setPlaces([]);
-    setTripDetails(null);
-    setHasStarted(false);
-    // Clear URL query
-    window.history.pushState({ path: '/' }, '', '/');
   };
 
   const handleAddPlace = (newPlace: Omit<Accommodation, 'id' | 'votes' | 'addedBy'>, addedBy: 'user' | 'ai' = 'user') => {
@@ -321,21 +204,8 @@ const App: React.FC = () => {
     );
   }
 
-  // Show Auth Screen if requested (or enforced)
-  if (showAuthScreen) {
-    return (
-      <AuthScreen 
-        onAuthSuccess={handleAuthSuccess}
-        onSkip={() => {
-          setShowAuthScreen(false);
-          setHasStarted(true);
-        }}
-      />
-    );
-  }
-
-  if (!hasStarted && !user) {
-    return <WelcomeScreen onStart={() => setShowAuthScreen(true)} />;
+  if (!hasStarted) {
+    return <WelcomeScreen onStart={() => setHasStarted(true)} />;
   }
 
   return (
@@ -362,37 +232,13 @@ const App: React.FC = () => {
             </div>
           </div>
           
-          <div className="flex items-center gap-2 md:gap-3">
-             {/* User Profile / Login Status */}
-             {user ? (
-               <div className="flex items-center gap-2 bg-slate-100 rounded-full pl-3 pr-1 py-1">
-                 <User size={16} className="text-slate-500" />
-                 <span className="text-xs text-slate-600 font-medium hidden sm:inline max-w-[100px] truncate">{user.email}</span>
-                 <button 
-                  onClick={handleLogout}
-                  className="bg-white p-1.5 rounded-full text-slate-400 hover:text-red-500 shadow-sm hover:shadow transition-all"
-                  title="ออกจากระบบ"
-                 >
-                   <LogOut size={14} />
-                 </button>
-               </div>
-             ) : (
-               <button 
-                onClick={() => setShowAuthScreen(true)}
-                className="bg-teal-500 text-white px-3 py-2 rounded-lg text-sm font-bold shadow hover:bg-teal-600 transition-colors flex items-center gap-1"
-               >
-                 <User size={16} /> <span className="hidden sm:inline">เข้าสู่ระบบ</span>
-               </button>
-             )}
-
-             <div className="w-px h-8 bg-slate-200 mx-1"></div>
-
+          <div className="flex items-center gap-3">
              <button
                 onClick={() => setShowShareModal(true)}
-                className="bg-indigo-50 text-indigo-600 hover:bg-indigo-100 p-2 rounded-full transition-colors flex items-center gap-2 px-3 md:px-4 text-sm font-semibold border border-indigo-100"
+                className="bg-indigo-50 text-indigo-600 hover:bg-indigo-100 p-2 rounded-full transition-colors flex items-center gap-2 px-4 text-sm font-semibold border border-indigo-100"
               >
                 <Share2 size={18} />
-                <span className="hidden sm:inline">แชร์</span>
+                <span className="hidden sm:inline">แชร์ / เซฟ</span>
               </button>
 
             {places.length > 0 && (
@@ -411,22 +257,6 @@ const App: React.FC = () => {
       {/* Main Content */}
       <main className="max-w-5xl mx-auto px-4 py-8">
         
-        {/* Guest Warning Banner */}
-        {!user && places.length > 0 && (
-           <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 mb-6 flex items-center justify-between gap-3 animate-fade-in-down">
-             <div className="flex items-center gap-2 text-amber-800 text-sm">
-               <CloudLightning size={16} className="text-amber-500" />
-               <span>คุณกำลังใช้งานแบบ Guest ข้อมูลอาจหายได้หากเปลี่ยนเครื่อง</span>
-             </div>
-             <button 
-               onClick={() => setShowAuthScreen(true)}
-               className="text-amber-700 font-bold text-sm underline hover:text-amber-900 whitespace-nowrap"
-             >
-               ล็อกอินเพื่อบันทึก
-             </button>
-           </div>
-        )}
-
         {/* Intro / Empty State */}
         {places.length === 0 && !showAddForm && (
           <div className="text-center py-20 bg-white rounded-3xl shadow-sm border border-slate-100 mb-8">

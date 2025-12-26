@@ -13,53 +13,15 @@ export const supabase = isSupabaseConfigured
   ? createClient(supabaseUrl, supabaseKey) 
   : null;
 
-// --- Auth Functions ---
-
-export const signIn = async (email: string, password: string) => {
-  if (!supabase) throw new Error("Supabase not configured");
-  const { data, error } = await supabase.auth.signInWithPassword({ email, password });
-  if (error) throw error;
-  return data;
-};
-
-export const signUp = async (email: string, password: string) => {
-  if (!supabase) throw new Error("Supabase not configured");
-  const { data, error } = await supabase.auth.signUp({ email, password });
-  if (error) throw error;
-  return data;
-};
-
-export const signOut = async () => {
-  if (!supabase) return;
-  const { error } = await supabase.auth.signOut();
-  if (error) throw error;
-};
-
-export const getCurrentUser = async () => {
-  if (!supabase) return null;
-  const { data: { user } } = await supabase.auth.getUser();
-  return user;
-};
-
-// --- Trip Functions ---
-
 export const createTrip = async (places: Accommodation[], tripDetails: TripDetails | null) => {
   if (!supabase) throw new Error("Supabase is not configured");
 
-  const user = await getCurrentUser();
-  
-  const payload: any = { 
-    places, 
-    trip_details: tripDetails || {} 
-  };
-
-  if (user) {
-    payload.user_id = user.id;
-  }
-
   const { data, error } = await supabase
     .from('trips')
-    .insert([payload])
+    .insert([{ 
+      places, 
+      trip_details: tripDetails || {} 
+    }])
     .select()
     .single();
 
@@ -95,24 +57,7 @@ export const getTrip = async (id: string) => {
   return data;
 };
 
-// Get the most recent trip for the logged-in user
-export const getUserLatestTrip = async (userId: string) => {
-  if (!supabase) throw new Error("Supabase is not configured");
-
-  const { data, error } = await supabase
-    .from('trips')
-    .select('*')
-    .eq('user_id', userId)
-    .order('updated_at', { ascending: false })
-    .limit(1)
-    .single();
-
-  if (error && error.code !== 'PGRST116') { // PGRST116 is "Row not found" which is fine
-    throw error;
-  }
-  return data;
-};
-
+// New: Subscribe to changes for a specific trip
 export const subscribeToTrip = (tripId: string, onUpdate: (payload: any) => void) => {
   if (!supabase) return null;
 
