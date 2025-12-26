@@ -385,7 +385,7 @@ const App: React.FC = () => {
                                 window.history.pushState({ path: newUrl }, '', newUrl);
                                 
                                 // Update Cache
-                                localStorage.setItem('kohlarn_last_trip_id', newId);
+                                if (newId) localStorage.setItem('kohlarn_last_trip_id', newId);
                                 success = true;
                              }
                         }
