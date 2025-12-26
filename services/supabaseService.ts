@@ -98,7 +98,45 @@ export const clearSupabaseConfig = () => {
     }
 };
 
-// --- Trip Functions (Anonymous / Link Based) ---
+// --- Auth Functions ---
+
+export const signUp = async (email: string, password: string, username?: string) => {
+  if (!supabase) throw new Error("Database not configured");
+  const { data, error } = await supabase.auth.signUp({
+    email,
+    password,
+    options: {
+        data: {
+            username: username
+        }
+    }
+  });
+  if (error) throw error;
+  return data;
+};
+
+export const signIn = async (email: string, password: string) => {
+  if (!supabase) throw new Error("Database not configured");
+  const { data, error } = await supabase.auth.signInWithPassword({
+    email,
+    password,
+  });
+  if (error) throw error;
+  return data;
+};
+
+export const signOut = async () => {
+  if (!supabase) return;
+  await supabase.auth.signOut();
+};
+
+export const getCurrentUser = async () => {
+  if (!supabase) return null;
+  const { data: { user } } = await supabase.auth.getUser();
+  return user;
+};
+
+// --- Trip Functions ---
 
 const checkSupabase = () => {
   if (!supabase) throw new Error("ยังไม่ได้ตั้งค่า Database");
@@ -107,10 +145,17 @@ const checkSupabase = () => {
 export const createTrip = async (places: Accommodation[], tripDetails: TripDetails | null) => {
   checkSupabase();
   
+  // Get current user to link trip
+  const user = await getCurrentUser();
+
   const payload: any = { 
     places, 
     trip_details: tripDetails || {},
   };
+
+  if (user) {
+    payload.user_id = user.id;
+  }
 
   const { data, error } = await supabase!
     .from('trips')
@@ -124,14 +169,22 @@ export const createTrip = async (places: Accommodation[], tripDetails: TripDetai
 
 export const updateTrip = async (id: string, places: Accommodation[], tripDetails: TripDetails | null) => {
   checkSupabase();
+  
+  // Try to link user if not linked yet (optional enhancement)
+  const user = await getCurrentUser();
+  const updatePayload: any = {
+    places, 
+    trip_details: tripDetails || {},
+    updated_at: new Date().toISOString() 
+  };
+
+  // Only attempt to add user_id if we have one. 
+  // Note: If RLS prevents update, this might fail if not owner.
+  // We assume simple public/anon usage or owner based RLS.
 
   const { error } = await supabase!
     .from('trips')
-    .update({ 
-      places, 
-      trip_details: tripDetails || {},
-      updated_at: new Date().toISOString() 
-    })
+    .update(updatePayload)
     .eq('id', id);
 
   if (error) throw error;
@@ -150,13 +203,15 @@ export const getTrip = async (id: string) => {
   return data;
 };
 
-export const getUserTrips = async (userId: string) => {
+export const getUserTrips = async () => {
   checkSupabase();
+  const user = await getCurrentUser();
+  if (!user) return [];
 
   const { data, error } = await supabase!
     .from('trips')
     .select('*')
-    .eq('user_id', userId)
+    .eq('user_id', user.id)
     .order('updated_at', { ascending: false });
 
   if (error) {

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Plus, MapPin, Anchor, Share2, CloudLightning, Loader2, Save, Settings, Sparkles, RotateCcw, X, WifiOff } from 'lucide-react';
+import { Plus, MapPin, Anchor, Share2, CloudLightning, Loader2, Save, Settings, Sparkles, RotateCcw, X, WifiOff, FolderOpen, UserCircle, LogIn, LogOut } from 'lucide-react';
 import PlaceCard from './components/PlaceCard';
 import AddForm from './components/AddForm';
 import AiModal from './components/AiModal';
@@ -7,6 +7,8 @@ import WelcomeScreen from './components/WelcomeScreen';
 import ShareModal from './components/ShareModal';
 import DatabaseConfigScreen from './components/AuthScreen';
 import PlaceDetailModal from './components/PlaceDetailModal';
+import TripHistoryModal from './components/TripHistoryModal';
+import AuthModal from './components/AuthModal';
 import { Accommodation, AiSuggestionParams, TripDetails } from './types';
 import { getAccommodationSuggestions } from './services/geminiService';
 import { 
@@ -16,7 +18,9 @@ import {
   subscribeToTrip, 
   isSupabaseConfigured, 
   supabase,
-  clearSupabaseConfig
+  clearSupabaseConfig,
+  getCurrentUser,
+  signOut
 } from './services/supabaseService';
 
 const App: React.FC = () => {
@@ -26,6 +30,8 @@ const App: React.FC = () => {
   const [showAddForm, setShowAddForm] = useState(false);
   const [showAiModal, setShowAiModal] = useState(false);
   const [showShareModal, setShowShareModal] = useState(false);
+  const [showHistoryModal, setShowHistoryModal] = useState(false);
+  const [showAuthModal, setShowAuthModal] = useState(false);
   
   // State for Editing and Viewing
   const [editingPlace, setEditingPlace] = useState<Accommodation | null>(null);
@@ -43,6 +49,9 @@ const App: React.FC = () => {
   const [isSyncing, setIsSyncing] = useState(false);
   const [isLoadingTrip, setIsLoadingTrip] = useState(false);
   const [isOffline, setIsOffline] = useState(!navigator.onLine);
+  
+  // Auth State
+  const [user, setUser] = useState<any>(null);
 
   // Ref to track if the last update came from the server to prevent echo loops
   const lastServerUpdate = useRef<number>(0);
@@ -61,14 +70,25 @@ const App: React.FC = () => {
     };
   }, []);
 
-  // Initialization Logic
+  // Auth & Init Logic
   useEffect(() => {
     const init = async () => {
+      if (!isSupabaseConfigured) return;
+
+      // Check User
+      const currentUser = await getCurrentUser();
+      setUser(currentUser);
+
+      // Listen for auth changes
+      supabase?.auth.onAuthStateChange((_event, session) => {
+        setUser(session?.user ?? null);
+      });
+
       const params = new URLSearchParams(window.location.search);
       let urlTripId = params.get('tripId');
       
       // AUTO-RESTORE LOGIC:
-      if (!urlTripId && isSupabaseConfigured) {
+      if (!urlTripId) {
         const lastVisitedId = localStorage.getItem('kohlarn_last_trip_id');
         if (lastVisitedId) {
             console.log("Restoring last visited trip:", lastVisitedId);
@@ -78,26 +98,23 @@ const App: React.FC = () => {
         }
       }
 
-      if (urlTripId && isSupabaseConfigured) {
+      if (urlTripId) {
         setIsLoadingTrip(true);
         setTripId(urlTripId);
         setHasStarted(true);
         
         // --- OFFLINE/CACHE FIRST STRATEGY ---
-        // 1. Try to load from Local Cache IMMEDIATELY
         const cachedData = localStorage.getItem(`kohlarn_trip_data_${urlTripId}`);
         if (cachedData) {
             try {
                 const parsed = JSON.parse(cachedData);
                 if (parsed.places) setPlaces(parsed.places);
                 if (parsed.trip_details) setTripDetails(parsed.trip_details);
-                console.log("Loaded data from local cache");
             } catch (e) {
                 console.warn("Failed to parse cached data");
             }
         }
 
-        // 2. Then try to fetch fresh data from Cloud
         try {
           const data = await getTrip(urlTripId);
           if (data) {
@@ -113,10 +130,8 @@ const App: React.FC = () => {
           }
         } catch (error) {
           console.error("Error loading trip from cloud:", error);
-          // If we have no cache and cloud fails, then show alert. 
-          // If we loaded cache, just stay silent (maybe offline).
           if (!cachedData) {
-              alert("ไม่สามารถโหลดข้อมูลทริปได้ และไม่มีข้อมูลเก่าในเครื่อง");
+              // Be silent if failure, maybe deleted or network
           }
         } finally {
           setIsLoadingTrip(false);
@@ -126,6 +141,35 @@ const App: React.FC = () => {
 
     init();
   }, []);
+
+  // History Tracker Effect
+  useEffect(() => {
+    if (tripId && places.length > 0) {
+        try {
+            const historyStr = localStorage.getItem('kohlarn_trip_history') || '[]';
+            const history = JSON.parse(historyStr);
+            
+            // Determine Title
+            let title = 'ทริปไม่มีชื่อ';
+            if (tripDetails?.style) title = `ทริป${tripDetails.style}`;
+            else if (places.length > 0) title = `ทริป ${places[0].name}`;
+
+            const newItem = {
+                id: tripId,
+                title: title,
+                date: new Date().toISOString(),
+                placeCount: places.length
+            };
+
+            const filteredHistory = history.filter((h: any) => h.id !== tripId);
+            const newHistory = [newItem, ...filteredHistory].slice(0, 10); 
+
+            localStorage.setItem('kohlarn_trip_history', JSON.stringify(newHistory));
+        } catch (e) {
+            console.error("Failed to save history", e);
+        }
+    }
+  }, [tripId, places, tripDetails]);
 
   // Realtime Subscription Effect
   useEffect(() => {
@@ -138,7 +182,6 @@ const App: React.FC = () => {
       if (newData.places) setPlaces(newData.places);
       if (newData.trip_details) setTripDetails(newData.trip_details);
       
-      // Update Cache on Realtime update
       localStorage.setItem(`kohlarn_trip_data_${tripId}`, JSON.stringify({
         places: newData.places,
         trip_details: newData.trip_details
@@ -150,38 +193,31 @@ const App: React.FC = () => {
     };
   }, [tripId]);
 
-  // Sync Logic (Push to Server) & Cache Update
+  // Sync Logic
   useEffect(() => {
     if (!tripId || !isSupabaseConfigured) return;
 
-    // 1. Always update local cache immediately when state changes
     localStorage.setItem(`kohlarn_trip_data_${tripId}`, JSON.stringify({
         places,
         trip_details: tripDetails
     }));
 
-    // Check if we recently received an update from server to avoid infinite loop
-    if (Date.now() - lastServerUpdate.current < 1000) {
-      return; 
-    }
+    if (Date.now() - lastServerUpdate.current < 1000) return;
 
-    // 2. Sync to Cloud
     const timer = setTimeout(async () => {
       setIsSyncing(true);
       try {
         await updateTrip(tripId, places, tripDetails);
       } catch (error) {
-        console.error("Sync failed (likely offline):", error);
-        // We don't need to alert here, the data is safe in localStorage
+        console.error("Sync failed:", error);
       } finally {
         setIsSyncing(false);
       }
-    }, 2000); // Debounce 2 seconds
+    }, 2000);
 
     return () => clearTimeout(timer);
   }, [places, tripDetails, tripId]);
 
-  // Function to create trip if it doesn't exist yet
   const ensureTripExists = async () => {
     if (!tripId && isSupabaseConfigured) {
        setIsSyncing(true);
@@ -202,7 +238,7 @@ const App: React.FC = () => {
          }
        } catch (e) {
          console.error("Error creating trip", e);
-         alert("ไม่สามารถสร้างทริปบน Cloud ได้ (อาจไม่มีอินเทอร์เน็ต)");
+         alert("ไม่สามารถสร้างทริปบน Cloud ได้");
        } finally {
          setIsSyncing(false);
        }
@@ -237,18 +273,13 @@ const App: React.FC = () => {
   };
 
   const handleDelete = (id: string) => {
-    // 1. Find the item
     const itemToDelete = places.find(p => p.id === id);
     if (!itemToDelete) return;
 
-    // 2. Save for undo and show toast
     setLastDeleted(itemToDelete);
     setShowUndoToast(true);
-
-    // 3. Delete from list
     setPlaces(prev => prev.filter(p => p.id !== id));
 
-    // 4. Set timer to clear undo capability (5 seconds)
     if (undoTimeoutRef.current) clearTimeout(undoTimeoutRef.current);
     undoTimeoutRef.current = window.setTimeout(() => {
         setShowUndoToast(false);
@@ -258,11 +289,7 @@ const App: React.FC = () => {
 
   const handleUndoDelete = () => {
     if (!lastDeleted) return;
-
-    // Add back to list (put it back at the top for visibility)
     setPlaces(prev => [lastDeleted, ...prev]);
-    
-    // Clear undo state
     setShowUndoToast(false);
     setLastDeleted(null);
     if (undoTimeoutRef.current) clearTimeout(undoTimeoutRef.current);
@@ -291,17 +318,6 @@ const App: React.FC = () => {
     }
   };
 
-  // REMOVED: handleClearAll button logic from UI, but function kept if needed internally
-  const handleClearAll = async () => {
-    if (window.confirm('ต้องการสร้างทริปใหม่? (ลิงก์เดิมจะยังใช้งานได้ แต่หน้าจอจะถูกเคลียร์)')) {
-      setPlaces([]);
-      setTripDetails(null);
-      setTripId(null);
-      localStorage.removeItem('kohlarn_last_trip_id'); // Clear last trip
-      window.history.pushState({ path: '/' }, '', '/');
-    }
-  };
-
   const handleManualSave = async () => {
     if (!tripId) {
         await ensureTripExists();
@@ -318,11 +334,70 @@ const App: React.FC = () => {
     }
   };
 
+  const handleExport = () => {
+    const data = {
+        tripId,
+        tripDetails,
+        places,
+        exportedAt: new Date().toISOString()
+    };
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `kohlarn-trip-${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  const handleImport = (file: File) => {
+    const reader = new FileReader();
+    reader.onload = async (e) => {
+        try {
+            const json = JSON.parse(e.target?.result as string);
+            if (json.places && Array.isArray(json.places)) {
+                if (confirm('ข้อมูลปัจจุบันจะถูกแทนที่ด้วยไฟล์นี้ ต้องการดำเนินการต่อหรือไม่?')) {
+                    setPlaces(json.places);
+                    setTripDetails(json.tripDetails || null);
+                    if (json.tripId) {
+                        setTripId(json.tripId);
+                        const newUrl = `${window.location.pathname}?tripId=${json.tripId}`;
+                        window.history.pushState({ path: newUrl }, '', newUrl);
+                    } else {
+                        setTripId(null);
+                    }
+                    setShowHistoryModal(false);
+                    alert('โหลดข้อมูลเรียบร้อยแล้ว');
+                }
+            } else {
+                alert('รูปแบบไฟล์ไม่ถูกต้อง');
+            }
+        } catch (err) {
+            console.error(err);
+            alert('ไม่สามารถอ่านไฟล์นี้ได้');
+        }
+    };
+    reader.readAsText(file);
+  };
+
+  const handleSignOut = async () => {
+    if(confirm('ต้องการออกจากระบบหรือไม่?')) {
+        await signOut();
+        setUser(null);
+    }
+  };
+  
+  const getUserDisplayName = () => {
+    if (!user) return '';
+    return user.user_metadata?.username || user.email?.split('@')[0] || 'นักเดินทาง';
+  };
+
   if (!isSupabaseConfigured) {
       return <DatabaseConfigScreen onConfigured={() => window.location.reload()} />;
   }
 
-  // Show loading only if we have NO data at all
   if (isLoadingTrip && places.length === 0) {
     return (
       <div className="fixed inset-0 bg-slate-50 flex flex-col items-center justify-center z-50">
@@ -356,12 +431,6 @@ const App: React.FC = () => {
                         <CloudLightning size={12} /> {isSyncing ? 'กำลังบันทึก...' : 'ออนไลน์'}
                         </span>
                     )}
-                    
-                    {!isSyncing && !isOffline && (
-                      <button onClick={handleManualSave} title="บันทึกทันที" className="text-slate-400 hover:text-teal-600">
-                        <Save size={14} />
-                      </button>
-                    )}
                  </div>
               ) : (
                 <span className="text-xs text-slate-400">สร้างทริปใหม่</span>
@@ -375,20 +444,35 @@ const App: React.FC = () => {
                 className="bg-teal-50 text-teal-600 hover:bg-teal-100 p-2 rounded-full transition-colors flex items-center gap-2 px-3 md:px-4 text-sm font-semibold border border-teal-100"
                 title="แชร์ทริปนี้"
               >
-                <Share2 size={18} /> <span className="hidden sm:inline">แชร์ทริป</span>
+                <Share2 size={18} /> <span className="hidden sm:inline">แชร์</span>
               </button>
 
-            <button 
-                onClick={() => {
-                   if(confirm('ต้องการรีเซ็ตการตั้งค่า Database หรือไม่?')) {
-                       clearSupabaseConfig();
-                   }
-                }}
-                className="text-slate-300 hover:text-slate-500 p-2"
-                title="ตั้งค่า Database"
-            >
-                <Settings size={18} />
-            </button>
+             <button
+                onClick={() => setShowHistoryModal(true)}
+                className="bg-slate-100 text-slate-600 hover:bg-slate-200 p-2 rounded-full transition-colors border border-slate-200"
+                title="ทริปของฉัน"
+              >
+                <FolderOpen size={18} />
+             </button>
+
+            {/* User Auth Button */}
+            {user ? (
+                <button 
+                    onClick={handleSignOut}
+                    className="bg-indigo-50 text-indigo-600 hover:bg-indigo-100 p-2 rounded-full border border-indigo-100"
+                    title={`ออกจากระบบ (${getUserDisplayName()})`}
+                >
+                    <LogOut size={18} />
+                </button>
+            ) : (
+                <button 
+                    onClick={() => setShowAuthModal(true)}
+                    className="bg-slate-800 text-white hover:bg-slate-900 p-2 rounded-full border border-slate-700"
+                    title="เข้าสู่ระบบ"
+                >
+                    <LogIn size={18} />
+                </button>
+            )}
           </div>
         </div>
       </header>
@@ -398,7 +482,7 @@ const App: React.FC = () => {
         
         {isOffline && (
             <div className="bg-slate-100 border border-slate-300 text-slate-600 px-4 py-2 rounded-lg mb-4 flex items-center gap-2 text-sm">
-                <WifiOff size={16} /> คุณกำลังใช้งานในโหมดออฟไลน์ ข้อมูลจะถูกบันทึกในเครื่องและซิงค์เมื่อมีเน็ต
+                <WifiOff size={16} /> โหมดออฟไลน์: ข้อมูลจะซิงค์เมื่อมีอินเทอร์เน็ต
             </div>
         )}
 
@@ -411,7 +495,9 @@ const App: React.FC = () => {
             <h2 className="text-2xl font-bold text-slate-700 mb-2">
                เริ่มวางแผนทริปกันเถอะ
             </h2>
-            <p className="text-slate-500 mb-6">ข้อมูลจะถูกบันทึกออนไลน์อัตโนมัติ แชร์ลิงก์ให้เพื่อนได้ทันที</p>
+            <p className="text-slate-500 mb-6">
+                {user ? `สวัสดี ${getUserDisplayName()}!` : 'ล็อกอินเพื่อเก็บข้อมูลทริปของคุณถาวร'}
+            </p>
             <div className="flex justify-center gap-4 flex-wrap">
                <button 
                 onClick={() => setShowAddForm(true)}
@@ -440,7 +526,7 @@ const App: React.FC = () => {
           </div>
         )}
 
-        {/* Action Buttons (Visible when there are items) */}
+        {/* Action Buttons */}
         {places.length > 0 && !showAddForm && !editingPlace && (
           <div className="flex gap-3 mb-8 overflow-x-auto pb-2 scrollbar-hide">
             <button 
@@ -452,12 +538,11 @@ const App: React.FC = () => {
           </div>
         )}
 
-        {/* Add Form Area */}
+        {/* Forms */}
         {showAddForm && (
           <AddForm onAdd={(p) => handleAddPlace(p, 'user')} onCancel={() => setShowAddForm(false)} />
         )}
 
-        {/* Edit Form Area */}
         {editingPlace && (
             <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
                 <div className="w-full max-w-2xl max-h-[90vh] overflow-y-auto">
@@ -526,6 +611,34 @@ const App: React.FC = () => {
       <PlaceDetailModal 
         place={viewingPlace} 
         onClose={() => setViewingPlace(null)} 
+      />
+
+      <TripHistoryModal 
+        isOpen={showHistoryModal}
+        onClose={() => setShowHistoryModal(false)}
+        onSelectTrip={(id) => {
+            setTripId(id);
+            const newUrl = `${window.location.pathname}?tripId=${id}`;
+            window.history.pushState({ path: newUrl }, '', newUrl);
+            window.location.reload();
+        }}
+        currentTripId={tripId}
+        onExport={handleExport}
+        onImport={handleImport}
+        isLoggedIn={!!user}
+        onLoginRequest={() => {
+            setShowHistoryModal(false);
+            setShowAuthModal(true);
+        }}
+      />
+
+      <AuthModal 
+        isOpen={showAuthModal}
+        onClose={() => setShowAuthModal(false)}
+        onAuthSuccess={() => {
+            setShowAuthModal(false);
+            alert("ยินดีต้อนรับกลับ!");
+        }}
       />
     </div>
   );
