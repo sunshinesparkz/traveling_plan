@@ -136,6 +136,14 @@ export const getCurrentUser = async () => {
   return user;
 };
 
+export const resetPasswordForEmail = async (email: string) => {
+    if (!supabase) throw new Error("Database not configured");
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+        redirectTo: window.location.origin, // Redirect back to the app
+    });
+    if (error) throw error;
+};
+
 // --- Trip Functions ---
 
 const checkSupabase = () => {
