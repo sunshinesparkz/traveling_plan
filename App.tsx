@@ -115,27 +115,26 @@ const App: React.FC = () => {
             }
         }
 
-        try {
-          const data = await getTrip(urlTripId);
-          if (data) {
-            if (data.places) setPlaces(data.places);
-            if (data.trip_details) setTripDetails(data.trip_details);
-            
-            // Update Cache
-            localStorage.setItem('kohlarn_last_trip_id', urlTripId);
-            localStorage.setItem(`kohlarn_trip_data_${urlTripId}`, JSON.stringify({
-                places: data.places,
-                trip_details: data.trip_details
-            }));
-          }
-        } catch (error) {
-          console.error("Error loading trip from cloud:", error);
-          if (!cachedData) {
-              // Be silent if failure, maybe deleted or network
-          }
-        } finally {
-          setIsLoadingTrip(false);
+        // Only fetch from cloud if it's a real ID (not offline_)
+        if (!urlTripId.startsWith('offline_')) {
+            try {
+              const data = await getTrip(urlTripId);
+              if (data) {
+                if (data.places) setPlaces(data.places);
+                if (data.trip_details) setTripDetails(data.trip_details);
+                
+                // Update Cache
+                localStorage.setItem('kohlarn_last_trip_id', urlTripId);
+                localStorage.setItem(`kohlarn_trip_data_${urlTripId}`, JSON.stringify({
+                    places: data.places,
+                    trip_details: data.trip_details
+                }));
+              }
+            } catch (error) {
+              console.error("Error loading trip from cloud:", error);
+            } 
         }
+        setIsLoadingTrip(false);
       }
     };
 
@@ -173,7 +172,7 @@ const App: React.FC = () => {
 
   // Realtime Subscription Effect
   useEffect(() => {
-    if (!tripId || !isSupabaseConfigured) return;
+    if (!tripId || !isSupabaseConfigured || tripId.startsWith('offline_')) return;
 
     const channel = subscribeToTrip(tripId, (newData) => {
       lastServerUpdate.current = Date.now();
@@ -197,12 +196,14 @@ const App: React.FC = () => {
   useEffect(() => {
     if (!tripId || !isSupabaseConfigured) return;
 
+    // Always save local cache first
     localStorage.setItem(`kohlarn_trip_data_${tripId}`, JSON.stringify({
         places,
         trip_details: tripDetails
     }));
 
     if (Date.now() - lastServerUpdate.current < 1000) return;
+    if (tripId.startsWith('offline_')) return; // Don't sync offline IDs
 
     const timer = setTimeout(async () => {
       setIsSyncing(true);
@@ -219,7 +220,7 @@ const App: React.FC = () => {
   }, [places, tripDetails, tripId]);
 
   const ensureTripExists = async () => {
-    if (!tripId && isSupabaseConfigured) {
+    if ((!tripId || tripId.startsWith('offline_')) && isSupabaseConfigured) {
        setIsSyncing(true);
        try {
          const newTrip = await createTrip(places, tripDetails);
@@ -238,7 +239,13 @@ const App: React.FC = () => {
          }
        } catch (e) {
          console.error("Error creating trip", e);
-         alert("ไม่สามารถสร้างทริปบน Cloud ได้");
+         // If creating cloud trip fails, ensure we keep the offline ID if we have one
+         if (!tripId) {
+             const offlineId = `offline_${Date.now()}`;
+             setTripId(offlineId);
+             localStorage.setItem('kohlarn_last_trip_id', offlineId);
+             return offlineId;
+         }
        } finally {
          setIsSyncing(false);
        }
@@ -325,8 +332,13 @@ const App: React.FC = () => {
     }
     setIsSyncing(true);
     try {
-      await updateTrip(tripId, places, tripDetails);
-      alert("บันทึกข้อมูลเรียบร้อยแล้ว");
+      if (tripId.startsWith('offline_')) {
+          await ensureTripExists(); // Try to convert offline to cloud
+          alert("พยายามเชื่อมต่อและบันทึกข้อมูลเรียบร้อยแล้ว");
+      } else {
+          await updateTrip(tripId, places, tripDetails);
+          alert("บันทึกข้อมูลเรียบร้อยแล้ว");
+      }
     } catch (error) {
       alert("การบันทึกออนไลน์ล้มเหลว (ข้อมูลถูกบันทึกในเครื่องแล้ว)");
     } finally {
@@ -359,49 +371,63 @@ const App: React.FC = () => {
             const json = JSON.parse(e.target?.result as string);
             if (json.places && Array.isArray(json.places)) {
                 if (confirm('ข้อมูลปัจจุบันจะถูกแทนที่ด้วยไฟล์นี้ ต้องการดำเนินการต่อหรือไม่?')) {
-                    // 1. Update UI
+                    // 1. Update UI Immediately
                     setPlaces(json.places);
                     setTripDetails(json.tripDetails || null);
                     
-                    // 2. Persist to Cloud immediately
                     setIsSyncing(true);
-                    
-                    try {
-                        let success = false;
-                        let newId = tripId;
+                    let success = false;
+                    let activeId = tripId;
 
-                        if (tripId) {
-                            // Try updating existing
-                             success = await updateTrip(tripId, json.places, json.tripDetails || null);
+                    // 2. Try to Sync to Cloud
+                    try {
+                        if (activeId && !activeId.startsWith('offline_')) {
+                            // Try updating existing cloud trip
+                             success = await updateTrip(activeId, json.places, json.tripDetails || null);
                         }
                         
-                        // If no trip ID or update failed (permission issue), create new
-                        if (!tripId || !success) {
+                        // If no ID or update failed (maybe RLS issue), try creating new
+                        if (!success || !activeId || activeId.startsWith('offline_')) {
                              const newTrip = await createTrip(json.places, json.tripDetails || null);
                              if (newTrip) {
-                                newId = newTrip.id;
-                                setTripId(newId);
-                                const newUrl = `${window.location.pathname}?tripId=${newId}`;
-                                window.history.pushState({ path: newUrl }, '', newUrl);
-                                
-                                // Update Cache
-                                if (newId) localStorage.setItem('kohlarn_last_trip_id', newId);
+                                activeId = newTrip.id;
                                 success = true;
                              }
                         }
-
-                        if (success) {
-                            alert('นำเข้าไฟล์และบันทึกข้อมูลเรียบร้อยแล้ว');
-                        } else {
-                            alert('นำเข้าไฟล์สำเร็จ (แต่บันทึกออนไลน์ไม่สำเร็จ)');
-                        }
-
                     } catch (syncError) {
-                        console.error("Sync error on import:", syncError);
-                        alert('นำเข้าไฟล์สำเร็จ (มีปัญหาในการเชื่อมต่อ Server)');
-                    } finally {
-                        setIsSyncing(false);
-                        setShowHistoryModal(false);
+                        console.warn("Cloud sync error during import, switching to offline:", syncError);
+                        success = false;
+                    }
+
+                    // 3. Handle Offline Fallback if Cloud failed
+                    if (!success) {
+                        // Use existing ID if it's offline, or generate new offline ID
+                        if (!activeId || !activeId.startsWith('offline_')) {
+                            activeId = `offline_${Date.now()}`;
+                        }
+                    }
+
+                    // 4. Update State & Local Storage
+                    if (activeId) {
+                        setTripId(activeId);
+                        const newUrl = `${window.location.pathname}?tripId=${activeId}`;
+                        window.history.pushState({ path: newUrl }, '', newUrl);
+                        
+                        // Always save to LocalStorage (works for both Cloud and Offline IDs)
+                        localStorage.setItem('kohlarn_last_trip_id', activeId);
+                        localStorage.setItem(`kohlarn_trip_data_${activeId}`, JSON.stringify({
+                            places: json.places,
+                            trip_details: json.tripDetails
+                        }));
+                    }
+
+                    setIsSyncing(false);
+                    setShowHistoryModal(false);
+
+                    if (success) {
+                        alert('นำเข้าไฟล์และบันทึกข้อมูลออนไลน์เรียบร้อยแล้ว');
+                    } else {
+                        alert('นำเข้าไฟล์เรียบร้อย (โหมดออฟไลน์: บันทึกในเครื่องเนื่องจากติดต่อ Server ไม่ได้)');
                     }
                 }
             } else {
@@ -433,37 +459,38 @@ const App: React.FC = () => {
     alert("ยินดีต้อนรับกลับ!");
     
     // SMART SYNC LOGIC:
-    // When a user logs in, we attempt to save the current local state to their account.
     if (tripId && places.length > 0) {
         setIsSyncing(true);
         try {
-            // 1. Try to claim/update the existing trip ID
-            const updated = await updateTrip(tripId, places, tripDetails);
-            
-            if (updated) {
-                console.log("Trip successfully claimed/updated.");
-            } else {
-                // 2. If update failed (likely RLS denied access to anonymous trip), 
-                // we clone it to a NEW trip ID owned by this user.
-                console.log("Could not update existing trip (RLS). Cloning to new trip...");
+            let success = false;
+
+            // If it was an offline trip, force create new
+            if (tripId.startsWith('offline_')) {
                 const newTrip = await createTrip(places, tripDetails);
                 if (newTrip) {
                     setTripId(newTrip.id);
-                    const newUrl = `${window.location.pathname}?tripId=${newTrip.id}`;
-                    window.history.replaceState({ path: newUrl }, '', newUrl);
-                    
                     localStorage.setItem('kohlarn_last_trip_id', newTrip.id);
-                    localStorage.setItem(`kohlarn_trip_data_${newTrip.id}`, JSON.stringify({
-                        places,
-                        trip_details: tripDetails
-                    }));
-                    alert("ระบบได้สร้างสำเนาทริปเข้าสู่บัญชีของคุณเรียบร้อยแล้ว");
+                    success = true;
+                }
+            } else {
+                // Try to claim existing
+                success = await updateTrip(tripId, places, tripDetails);
+                if (!success) {
+                    // Clone if update failed
+                    const newTrip = await createTrip(places, tripDetails);
+                    if (newTrip) {
+                        setTripId(newTrip.id);
+                        localStorage.setItem('kohlarn_last_trip_id', newTrip.id);
+                        success = true;
+                    }
                 }
             }
+
+            if (success) {
+                alert("ซิงค์ข้อมูลเข้าสู่บัญชีของคุณเรียบร้อยแล้ว");
+            }
         } catch (err) {
-            console.error("Sync failed:", err);
-            // Fallback: Force create new if error matches permission issues, 
-            // but usually createTrip is safer.
+            console.error("Auth sync failed:", err);
         } finally {
             setIsSyncing(false);
         }
@@ -498,7 +525,7 @@ const App: React.FC = () => {
               <h1 className="text-xl sm:text-2xl font-bold tracking-tight leading-none">Koh Larn Planner</h1>
               {tripId ? (
                  <div className="flex items-center gap-2">
-                    {isOffline ? (
+                    {isOffline || (tripId && tripId.startsWith('offline_')) ? (
                         <span className="text-xs font-bold text-slate-500 flex items-center gap-1 bg-slate-100 px-2 py-0.5 rounded-full">
                            <WifiOff size={12} /> ออฟไลน์
                         </span>
