@@ -1,13 +1,18 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { AiSuggestionParams, Accommodation } from "../types";
 
+// Declare process to avoid TypeScript errors
+declare const process: any;
+
+// The API key must be obtained exclusively from the environment variable process.env.API_KEY
 const apiKey = process.env.API_KEY || ''; 
 
-const ai = new GoogleGenAI({ apiKey: apiKey });
+// Initialize only if key exists to avoid immediate errors, though functionality will be limited
+const ai = apiKey ? new GoogleGenAI({ apiKey: apiKey }) : null;
 
 export const getAccommodationSuggestions = async (params: AiSuggestionParams): Promise<Omit<Accommodation, 'id' | 'votes' | 'addedBy'>[]> => {
-  if (!apiKey) {
-    console.warn("API_KEY not found in environment variables. Returning mock data.");
+  if (!ai || !apiKey) {
+    console.warn("API_KEY not found. Returning mock data.");
     return [
       { 
         name: "บ้านรินรักษ์ (Mock)", 
@@ -44,7 +49,7 @@ export const getAccommodationSuggestions = async (params: AiSuggestionParams): P
     `;
 
     const response = await ai.models.generateContent({
-      model: "gemini-2.5-flash-latest",
+      model: "gemini-3-flash-preview",
       contents: prompt,
       config: {
         responseMimeType: "application/json",

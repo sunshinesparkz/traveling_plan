@@ -1,10 +1,9 @@
 import { createClient } from '@supabase/supabase-js';
 import { Accommodation } from '../types';
 
-// Support both Vite's import.meta.env and process.env (as fallback)
-// Fix: Cast import.meta to any to avoid TS error "Property 'env' does not exist on type 'ImportMeta'"
-const supabaseUrl = (import.meta as any).env?.VITE_SUPABASE_URL || process.env.VITE_SUPABASE_URL || '';
-const supabaseKey = (import.meta as any).env?.VITE_SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY || '';
+const env = (import.meta as any).env;
+const supabaseUrl = env.VITE_SUPABASE_URL || '';
+const supabaseKey = env.VITE_SUPABASE_ANON_KEY || '';
 
 export const isSupabaseConfigured = !!(supabaseUrl && supabaseKey);
 
