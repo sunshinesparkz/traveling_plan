@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Plus, MapPin, Anchor, Share2, CloudLightning, Loader2, Save, Settings, Sparkles, RotateCcw, X } from 'lucide-react';
+import { Plus, MapPin, Anchor, Share2, CloudLightning, Loader2, Save, Settings, Sparkles, RotateCcw, X, WifiOff } from 'lucide-react';
 import PlaceCard from './components/PlaceCard';
 import AddForm from './components/AddForm';
 import AiModal from './components/AiModal';
@@ -42,9 +42,24 @@ const App: React.FC = () => {
   const [tripId, setTripId] = useState<string | null>(null);
   const [isSyncing, setIsSyncing] = useState(false);
   const [isLoadingTrip, setIsLoadingTrip] = useState(false);
+  const [isOffline, setIsOffline] = useState(!navigator.onLine);
 
   // Ref to track if the last update came from the server to prevent echo loops
   const lastServerUpdate = useRef<number>(0);
+
+  // Network Status Listener
+  useEffect(() => {
+    const handleOnline = () => setIsOffline(false);
+    const handleOffline = () => setIsOffline(true);
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
 
   // Initialization Logic
   useEffect(() => {
@@ -53,13 +68,11 @@ const App: React.FC = () => {
       let urlTripId = params.get('tripId');
       
       // AUTO-RESTORE LOGIC:
-      // If no tripId in URL, try to find the last visited trip from LocalStorage
       if (!urlTripId && isSupabaseConfigured) {
         const lastVisitedId = localStorage.getItem('kohlarn_last_trip_id');
         if (lastVisitedId) {
             console.log("Restoring last visited trip:", lastVisitedId);
             urlTripId = lastVisitedId;
-            // Silently update URL to include the ID so sharing works correctly
             const newUrl = `${window.location.pathname}?tripId=${lastVisitedId}`;
             window.history.replaceState(null, '', newUrl);
         }
@@ -68,21 +81,43 @@ const App: React.FC = () => {
       if (urlTripId && isSupabaseConfigured) {
         setIsLoadingTrip(true);
         setTripId(urlTripId);
-        setHasStarted(true); // Auto start if coming from link or restore
+        setHasStarted(true);
         
+        // --- OFFLINE/CACHE FIRST STRATEGY ---
+        // 1. Try to load from Local Cache IMMEDIATELY
+        const cachedData = localStorage.getItem(`kohlarn_trip_data_${urlTripId}`);
+        if (cachedData) {
+            try {
+                const parsed = JSON.parse(cachedData);
+                if (parsed.places) setPlaces(parsed.places);
+                if (parsed.trip_details) setTripDetails(parsed.trip_details);
+                console.log("Loaded data from local cache");
+            } catch (e) {
+                console.warn("Failed to parse cached data");
+            }
+        }
+
+        // 2. Then try to fetch fresh data from Cloud
         try {
           const data = await getTrip(urlTripId);
           if (data) {
             if (data.places) setPlaces(data.places);
             if (data.trip_details) setTripDetails(data.trip_details);
-            // Confirm this is the active trip in storage
+            
+            // Update Cache
             localStorage.setItem('kohlarn_last_trip_id', urlTripId);
+            localStorage.setItem(`kohlarn_trip_data_${urlTripId}`, JSON.stringify({
+                places: data.places,
+                trip_details: data.trip_details
+            }));
           }
         } catch (error) {
-          console.error("Error loading trip:", error);
-          alert("ไม่สามารถโหลดข้อมูลทริปได้ หรือลิงก์ไม่ถูกต้อง");
-          // If load fails (e.g. deleted), maybe clear the bad ID
-          // localStorage.removeItem('kohlarn_last_trip_id'); 
+          console.error("Error loading trip from cloud:", error);
+          // If we have no cache and cloud fails, then show alert. 
+          // If we loaded cache, just stay silent (maybe offline).
+          if (!cachedData) {
+              alert("ไม่สามารถโหลดข้อมูลทริปได้ และไม่มีข้อมูลเก่าในเครื่อง");
+          }
         } finally {
           setIsLoadingTrip(false);
         }
@@ -97,12 +132,17 @@ const App: React.FC = () => {
     if (!tripId || !isSupabaseConfigured) return;
 
     const channel = subscribeToTrip(tripId, (newData) => {
-      // Mark that we just received an update from server
       lastServerUpdate.current = Date.now();
       
       console.log("Received realtime update:", newData);
       if (newData.places) setPlaces(newData.places);
       if (newData.trip_details) setTripDetails(newData.trip_details);
+      
+      // Update Cache on Realtime update
+      localStorage.setItem(`kohlarn_trip_data_${tripId}`, JSON.stringify({
+        places: newData.places,
+        trip_details: newData.trip_details
+      }));
     });
 
     return () => {
@@ -110,21 +150,29 @@ const App: React.FC = () => {
     };
   }, [tripId]);
 
-  // Sync Logic (Push to Server)
+  // Sync Logic (Push to Server) & Cache Update
   useEffect(() => {
     if (!tripId || !isSupabaseConfigured) return;
+
+    // 1. Always update local cache immediately when state changes
+    localStorage.setItem(`kohlarn_trip_data_${tripId}`, JSON.stringify({
+        places,
+        trip_details: tripDetails
+    }));
 
     // Check if we recently received an update from server to avoid infinite loop
     if (Date.now() - lastServerUpdate.current < 1000) {
       return; 
     }
 
+    // 2. Sync to Cloud
     const timer = setTimeout(async () => {
       setIsSyncing(true);
       try {
         await updateTrip(tripId, places, tripDetails);
       } catch (error) {
-        console.error("Sync failed:", error);
+        console.error("Sync failed (likely offline):", error);
+        // We don't need to alert here, the data is safe in localStorage
       } finally {
         setIsSyncing(false);
       }
@@ -141,15 +189,20 @@ const App: React.FC = () => {
          const newTrip = await createTrip(places, tripDetails);
          if (newTrip) {
             setTripId(newTrip.id);
-            // Update URL and LocalStorage
             const newUrl = `${window.location.pathname}?tripId=${newTrip.id}`;
             window.history.pushState({ path: newUrl }, '', newUrl);
+            
             localStorage.setItem('kohlarn_last_trip_id', newTrip.id);
+            localStorage.setItem(`kohlarn_trip_data_${newTrip.id}`, JSON.stringify({
+                places,
+                trip_details: tripDetails
+            }));
+
             return newTrip.id;
          }
        } catch (e) {
          console.error("Error creating trip", e);
-         alert("ไม่สามารถสร้างทริปบน Cloud ได้ กรุณาเช็คการเชื่อมต่อ");
+         alert("ไม่สามารถสร้างทริปบน Cloud ได้ (อาจไม่มีอินเทอร์เน็ต)");
        } finally {
          setIsSyncing(false);
        }
@@ -168,7 +221,6 @@ const App: React.FC = () => {
     setPlaces(prev => [place, ...prev]);
     if (addedBy === 'user') setShowAddForm(false);
 
-    // If this is the first item, create the cloud trip
     await ensureTripExists();
   };
 
@@ -225,7 +277,7 @@ const App: React.FC = () => {
   const handleAiSearch = async (params: AiSuggestionParams) => {
     setIsAiLoading(true);
     setTripDetails(params);
-    await ensureTripExists(); // Make sure trip exists to save details
+    await ensureTripExists(); 
     
     try {
       const suggestions = await getAccommodationSuggestions(params);
@@ -233,7 +285,7 @@ const App: React.FC = () => {
       setShowAiModal(false);
       alert(`เพิ่ม ${suggestions.length} ที่พักแนะนำจาก AI เรียบร้อย!`);
     } catch (error) {
-      alert("ขออภัย เกิดข้อผิดพลาดในการเชื่อมต่อกับ AI");
+      alert("ขออภัย AI ต้องการอินเทอร์เน็ตในการทำงาน");
     } finally {
       setIsAiLoading(false);
     }
@@ -260,7 +312,7 @@ const App: React.FC = () => {
       await updateTrip(tripId, places, tripDetails);
       alert("บันทึกข้อมูลเรียบร้อยแล้ว");
     } catch (error) {
-      alert("การบันทึกข้อมูลล้มเหลว กรุณาลองใหม่อีกครั้ง");
+      alert("การบันทึกออนไลน์ล้มเหลว (ข้อมูลถูกบันทึกในเครื่องแล้ว)");
     } finally {
       setIsSyncing(false);
     }
@@ -270,11 +322,12 @@ const App: React.FC = () => {
       return <DatabaseConfigScreen onConfigured={() => window.location.reload()} />;
   }
 
-  if (isLoadingTrip) {
+  // Show loading only if we have NO data at all
+  if (isLoadingTrip && places.length === 0) {
     return (
       <div className="fixed inset-0 bg-slate-50 flex flex-col items-center justify-center z-50">
         <Loader2 className="animate-spin text-teal-600 mb-4" size={48} />
-        <p className="text-slate-600 font-medium">กำลังโหลดทริปจาก Cloud...</p>
+        <p className="text-slate-600 font-medium">กำลังโหลดทริป...</p>
       </div>
     );
   }
@@ -294,10 +347,17 @@ const App: React.FC = () => {
               <h1 className="text-xl sm:text-2xl font-bold tracking-tight leading-none">Koh Larn Planner</h1>
               {tripId ? (
                  <div className="flex items-center gap-2">
-                    <span className={`text-xs font-medium flex items-center gap-1 ${isSyncing ? 'text-amber-500' : 'text-teal-500'}`}>
-                      <CloudLightning size={12} /> {isSyncing ? 'กำลังบันทึก...' : 'บันทึกออนไลน์'}
-                    </span>
-                    {!isSyncing && (
+                    {isOffline ? (
+                        <span className="text-xs font-bold text-slate-500 flex items-center gap-1 bg-slate-100 px-2 py-0.5 rounded-full">
+                           <WifiOff size={12} /> ออฟไลน์
+                        </span>
+                    ) : (
+                        <span className={`text-xs font-medium flex items-center gap-1 ${isSyncing ? 'text-amber-500' : 'text-teal-500'}`}>
+                        <CloudLightning size={12} /> {isSyncing ? 'กำลังบันทึก...' : 'ออนไลน์'}
+                        </span>
+                    )}
+                    
+                    {!isSyncing && !isOffline && (
                       <button onClick={handleManualSave} title="บันทึกทันที" className="text-slate-400 hover:text-teal-600">
                         <Save size={14} />
                       </button>
@@ -318,8 +378,6 @@ const App: React.FC = () => {
                 <Share2 size={18} /> <span className="hidden sm:inline">แชร์ทริป</span>
               </button>
 
-            {/* REMOVED: Create New Trip Button as requested */}
-
             <button 
                 onClick={() => {
                    if(confirm('ต้องการรีเซ็ตการตั้งค่า Database หรือไม่?')) {
@@ -338,6 +396,12 @@ const App: React.FC = () => {
       {/* Main Content */}
       <main className="max-w-5xl mx-auto px-4 py-8">
         
+        {isOffline && (
+            <div className="bg-slate-100 border border-slate-300 text-slate-600 px-4 py-2 rounded-lg mb-4 flex items-center gap-2 text-sm">
+                <WifiOff size={16} /> คุณกำลังใช้งานในโหมดออฟไลน์ ข้อมูลจะถูกบันทึกในเครื่องและซิงค์เมื่อมีเน็ต
+            </div>
+        )}
+
         {/* Intro / Empty State */}
         {places.length === 0 && !showAddForm && (
           <div className="text-center py-20 bg-white rounded-3xl shadow-sm border border-slate-100 mb-8">
