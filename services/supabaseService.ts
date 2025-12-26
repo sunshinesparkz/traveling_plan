@@ -4,15 +4,42 @@ import { Accommodation, TripDetails } from '../types';
 // process.env is defined in vite.config.ts
 declare const process: any;
 
-// Helper to get config from Env or LocalStorage
+// Helper to get config from Env, URL Params (Magic Link), or LocalStorage
 const getSupabaseConfig = () => {
+  // 0. Check for Magic Config in URL first (For sharing across devices)
+  if (typeof window !== 'undefined') {
+    const params = new URLSearchParams(window.location.search);
+    const magicConfig = params.get('ConnectConfig');
+    
+    if (magicConfig) {
+      try {
+        // Decode Base64 string to get JSON
+        const decoded = atob(magicConfig);
+        const { url, key } = JSON.parse(decoded);
+        
+        if (url && key) {
+          // Save to local storage immediately
+          localStorage.setItem('kohlarn_supabase_config', JSON.stringify({ url, key }));
+          
+          // Remove the config param from URL to clean it up, but keep other params like tripId
+          params.delete('ConnectConfig');
+          const newQuery = params.toString();
+          const newPath = window.location.pathname + (newQuery ? '?' + newQuery : '');
+          window.history.replaceState({}, '', newPath);
+          
+          return { url, key, source: 'local' }; // Return immediately using this new config
+        }
+      } catch (e) {
+        console.error("Invalid Magic Config", e);
+      }
+    }
+  }
+
   let envUrl = '';
   let envKey = '';
 
   // 1. Try Vite standard import.meta.env
-  // Use 'as any' to avoid TS error: Property 'env' does not exist on type 'ImportMeta'
   const meta = import.meta as any;
-  
   if (typeof meta !== 'undefined' && meta.env) {
     envUrl = meta.env.VITE_SUPABASE_URL || '';
     envKey = meta.env.VITE_SUPABASE_ANON_KEY || '';
@@ -46,7 +73,9 @@ const getSupabaseConfig = () => {
   return { url: '', key: '', source: 'none' };
 };
 
-const { url: supabaseUrl, key: supabaseKey, source: configSource } = getSupabaseConfig();
+// Export config details to be used in UI (e.g. ShareModal)
+export const configDetails = getSupabaseConfig();
+const { url: supabaseUrl, key: supabaseKey } = configDetails;
 
 export const isSupabaseConfigured = !!(supabaseUrl && supabaseKey);
 
@@ -61,7 +90,7 @@ export const configureSupabase = (url: string, key: string) => {
 };
 
 export const clearSupabaseConfig = () => {
-    if (configSource === 'local') {
+    if (configDetails.source === 'local') {
         localStorage.removeItem('kohlarn_supabase_config');
         window.location.reload();
     } else {
@@ -81,7 +110,6 @@ export const createTrip = async (places: Accommodation[], tripDetails: TripDetai
   const payload: any = { 
     places, 
     trip_details: tripDetails || {},
-    // No user_id needed anymore
   };
 
   const { data, error } = await supabase!
