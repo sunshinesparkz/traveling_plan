@@ -359,17 +359,50 @@ const App: React.FC = () => {
             const json = JSON.parse(e.target?.result as string);
             if (json.places && Array.isArray(json.places)) {
                 if (confirm('ข้อมูลปัจจุบันจะถูกแทนที่ด้วยไฟล์นี้ ต้องการดำเนินการต่อหรือไม่?')) {
+                    // 1. Update UI
                     setPlaces(json.places);
                     setTripDetails(json.tripDetails || null);
-                    if (json.tripId) {
-                        setTripId(json.tripId);
-                        const newUrl = `${window.location.pathname}?tripId=${json.tripId}`;
-                        window.history.pushState({ path: newUrl }, '', newUrl);
-                    } else {
-                        setTripId(null);
+                    
+                    // 2. Persist to Cloud immediately
+                    setIsSyncing(true);
+                    
+                    try {
+                        let success = false;
+                        let newId = tripId;
+
+                        if (tripId) {
+                            // Try updating existing
+                             success = await updateTrip(tripId, json.places, json.tripDetails || null);
+                        }
+                        
+                        // If no trip ID or update failed (permission issue), create new
+                        if (!tripId || !success) {
+                             const newTrip = await createTrip(json.places, json.tripDetails || null);
+                             if (newTrip) {
+                                newId = newTrip.id;
+                                setTripId(newId);
+                                const newUrl = `${window.location.pathname}?tripId=${newId}`;
+                                window.history.pushState({ path: newUrl }, '', newUrl);
+                                
+                                // Update Cache
+                                localStorage.setItem('kohlarn_last_trip_id', newId);
+                                success = true;
+                             }
+                        }
+
+                        if (success) {
+                            alert('นำเข้าไฟล์และบันทึกข้อมูลเรียบร้อยแล้ว');
+                        } else {
+                            alert('นำเข้าไฟล์สำเร็จ (แต่บันทึกออนไลน์ไม่สำเร็จ)');
+                        }
+
+                    } catch (syncError) {
+                        console.error("Sync error on import:", syncError);
+                        alert('นำเข้าไฟล์สำเร็จ (มีปัญหาในการเชื่อมต่อ Server)');
+                    } finally {
+                        setIsSyncing(false);
+                        setShowHistoryModal(false);
                     }
-                    setShowHistoryModal(false);
-                    alert('โหลดข้อมูลเรียบร้อยแล้ว');
                 }
             } else {
                 alert('รูปแบบไฟล์ไม่ถูกต้อง');
