@@ -386,6 +386,7 @@ const App: React.FC = () => {
     if(confirm('ต้องการออกจากระบบหรือไม่?')) {
         await signOut();
         setUser(null);
+        window.location.reload(); // Reload to clear any user-specific state
     }
   };
   
@@ -394,16 +395,45 @@ const App: React.FC = () => {
     return user.user_metadata?.username || user.email?.split('@')[0] || 'นักเดินทาง';
   };
   
-  const handleAuthSuccess = () => {
+  const handleAuthSuccess = async () => {
     setShowAuthModal(false);
     alert("ยินดีต้อนรับกลับ!");
-    // Sync current trip to account immediately
-    if (tripId) {
+    
+    // SMART SYNC LOGIC:
+    // When a user logs in, we attempt to save the current local state to their account.
+    if (tripId && places.length > 0) {
         setIsSyncing(true);
-        updateTrip(tripId, places, tripDetails)
-            .then(() => console.log("Trip synced to user account"))
-            .catch(err => console.error("Failed to sync trip on login", err))
-            .finally(() => setIsSyncing(false));
+        try {
+            // 1. Try to claim/update the existing trip ID
+            const updated = await updateTrip(tripId, places, tripDetails);
+            
+            if (updated) {
+                console.log("Trip successfully claimed/updated.");
+            } else {
+                // 2. If update failed (likely RLS denied access to anonymous trip), 
+                // we clone it to a NEW trip ID owned by this user.
+                console.log("Could not update existing trip (RLS). Cloning to new trip...");
+                const newTrip = await createTrip(places, tripDetails);
+                if (newTrip) {
+                    setTripId(newTrip.id);
+                    const newUrl = `${window.location.pathname}?tripId=${newTrip.id}`;
+                    window.history.replaceState({ path: newUrl }, '', newUrl);
+                    
+                    localStorage.setItem('kohlarn_last_trip_id', newTrip.id);
+                    localStorage.setItem(`kohlarn_trip_data_${newTrip.id}`, JSON.stringify({
+                        places,
+                        trip_details: tripDetails
+                    }));
+                    alert("ระบบได้สร้างสำเนาทริปเข้าสู่บัญชีของคุณเรียบร้อยแล้ว");
+                }
+            }
+        } catch (err) {
+            console.error("Sync failed:", err);
+            // Fallback: Force create new if error matches permission issues, 
+            // but usually createTrip is safer.
+        } finally {
+            setIsSyncing(false);
+        }
     }
   };
 

@@ -178,7 +178,6 @@ export const createTrip = async (places: Accommodation[], tripDetails: TripDetai
 export const updateTrip = async (id: string, places: Accommodation[], tripDetails: TripDetails | null) => {
   checkSupabase();
   
-  // Try to link user if not linked yet
   const user = await getCurrentUser();
   
   const updatePayload: any = {
@@ -187,17 +186,21 @@ export const updateTrip = async (id: string, places: Accommodation[], tripDetail
     updated_at: new Date().toISOString() 
   };
 
-  // IMPORTANT: Explicitly set user_id to claim ownership if logged in
   if (user) {
     updatePayload.user_id = user.id;
   }
 
-  const { error } = await supabase!
+  // We use .select() to verify if the update actually happened (User has permission)
+  const { data, error } = await supabase!
     .from('trips')
     .update(updatePayload)
-    .eq('id', id);
+    .eq('id', id)
+    .select();
 
   if (error) throw error;
+  
+  // Return true if at least one row was updated
+  return data && data.length > 0;
 };
 
 export const getTrip = async (id: string) => {
