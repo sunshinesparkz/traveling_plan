@@ -5,7 +5,8 @@ import AddForm from './components/AddForm';
 import AiModal from './components/AiModal';
 import WelcomeScreen from './components/WelcomeScreen';
 import ShareModal from './components/ShareModal';
-import DatabaseConfigScreen from './components/AuthScreen'; // Reused file, new component
+import DatabaseConfigScreen from './components/AuthScreen';
+import PlaceDetailModal from './components/PlaceDetailModal';
 import { Accommodation, AiSuggestionParams, TripDetails } from './types';
 import { getAccommodationSuggestions } from './services/geminiService';
 import { 
@@ -25,6 +26,10 @@ const App: React.FC = () => {
   const [showAddForm, setShowAddForm] = useState(false);
   const [showAiModal, setShowAiModal] = useState(false);
   const [showShareModal, setShowShareModal] = useState(false);
+  
+  // State for Editing and Viewing
+  const [editingPlace, setEditingPlace] = useState<Accommodation | null>(null);
+  const [viewingPlace, setViewingPlace] = useState<Accommodation | null>(null);
   
   const [isAiLoading, setIsAiLoading] = useState(false);
   const [hasStarted, setHasStarted] = useState(false);
@@ -141,6 +146,18 @@ const App: React.FC = () => {
 
     // If this is the first item, create the cloud trip
     await ensureTripExists();
+  };
+
+  const handleUpdatePlace = (updatedData: Omit<Accommodation, 'id' | 'votes' | 'addedBy'>) => {
+    if (!editingPlace) return;
+
+    setPlaces(prev => prev.map(p => 
+      p.id === editingPlace.id 
+        ? { ...p, ...updatedData, images: updatedData.images } 
+        : p
+    ));
+    
+    setEditingPlace(null);
   };
 
   const handleDelete = (id: string) => {
@@ -322,7 +339,7 @@ const App: React.FC = () => {
         )}
 
         {/* Action Buttons (Visible when there are items) */}
-        {places.length > 0 && !showAddForm && (
+        {places.length > 0 && !showAddForm && !editingPlace && (
           <div className="flex gap-3 mb-8 overflow-x-auto pb-2 scrollbar-hide">
             <button 
               onClick={() => setShowAddForm(true)}
@@ -344,6 +361,19 @@ const App: React.FC = () => {
           <AddForm onAdd={(p) => handleAddPlace(p, 'user')} onCancel={() => setShowAddForm(false)} />
         )}
 
+        {/* Edit Form Area */}
+        {editingPlace && (
+            <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+                <div className="w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+                    <AddForm 
+                        onAdd={handleUpdatePlace} 
+                        onCancel={() => setEditingPlace(null)}
+                        initialData={editingPlace}
+                    />
+                </div>
+            </div>
+        )}
+
         {/* Grid List */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {places.sort((a, b) => b.votes - a.votes).map((place) => (
@@ -351,7 +381,9 @@ const App: React.FC = () => {
               <PlaceCard 
                 place={place} 
                 onVote={handleVote} 
-                onDelete={handleDelete} 
+                onDelete={handleDelete}
+                onEdit={setEditingPlace}
+                onView={setViewingPlace}
               />
             </div>
           ))}
@@ -372,7 +404,12 @@ const App: React.FC = () => {
         places={places}
         tripDetails={tripDetails}
         currentTripId={tripId}
-        onTripCreated={() => {}} // No longer needed as button is hidden
+        onTripCreated={() => {}} 
+      />
+
+      <PlaceDetailModal 
+        place={viewingPlace} 
+        onClose={() => setViewingPlace(null)} 
       />
     </div>
   );

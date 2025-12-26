@@ -1,21 +1,26 @@
 import React from 'react';
-import { Trash2, ExternalLink, ThumbsUp, MapPin, ImageOff } from 'lucide-react';
+import { Trash2, ExternalLink, ThumbsUp, MapPin, ImageOff, Edit2, Eye } from 'lucide-react';
 import { Accommodation } from '../types';
 
 interface PlaceCardProps {
   place: Accommodation;
   onVote: (id: string) => void;
   onDelete: (id: string) => void;
+  onEdit: (place: Accommodation) => void;
+  onView: (place: Accommodation) => void;
 }
 
-const PlaceCard: React.FC<PlaceCardProps> = ({ place, onVote, onDelete }) => {
+const PlaceCard: React.FC<PlaceCardProps> = ({ place, onVote, onDelete, onEdit, onView }) => {
   return (
-    <div className="bg-white rounded-xl shadow-md overflow-hidden hover:shadow-lg transition-all duration-300 border border-slate-100 flex flex-col h-full group">
+    <div className="bg-white rounded-xl shadow-md overflow-hidden hover:shadow-lg transition-all duration-300 border border-slate-100 flex flex-col h-full group relative">
       
-      {/* Image Section */}
-      <div className="relative h-48 bg-slate-100 overflow-hidden group/image">
+      {/* Image Section - Clickable */}
+      <div 
+        className="relative h-48 bg-slate-100 overflow-hidden group/image cursor-pointer"
+        onClick={() => onView(place)}
+      >
         {place.images && place.images.length > 0 ? (
-           <div className="flex overflow-x-auto snap-x snap-mandatory h-full scrollbar-hide">
+           <div className="flex overflow-x-auto snap-x snap-mandatory h-full scrollbar-hide pointer-events-none">
              {place.images.map((img, index) => (
                <img 
                  key={index}
@@ -40,6 +45,13 @@ const PlaceCard: React.FC<PlaceCardProps> = ({ place, onVote, onDelete }) => {
           </div>
         )}
         
+        {/* Overlay on hover */}
+        <div className="absolute inset-0 bg-black/0 group-hover/image:bg-black/10 transition-colors flex items-center justify-center">
+            <div className="bg-white/90 text-slate-700 px-3 py-1 rounded-full text-sm font-semibold opacity-0 group-hover/image:opacity-100 transition-opacity transform translate-y-2 group-hover/image:translate-y-0 shadow-sm flex items-center gap-1">
+                <Eye size={14} /> ดูรายละเอียด
+            </div>
+        </div>
+        
         {place.addedBy === 'ai' && (
             <span className="absolute top-2 right-2 bg-white/90 text-purple-600 text-xs px-2 py-1 rounded-full font-bold shadow-sm backdrop-blur-sm border border-purple-100">
               AI แนะนำ
@@ -49,7 +61,10 @@ const PlaceCard: React.FC<PlaceCardProps> = ({ place, onVote, onDelete }) => {
 
       <div className="p-5 flex-1 flex flex-col">
         <div className="flex justify-between items-start mb-2">
-          <h3 className="text-xl font-semibold text-slate-800 leading-tight">
+          <h3 
+            className="text-xl font-semibold text-slate-800 leading-tight cursor-pointer hover:text-teal-600 transition-colors"
+            onClick={() => onView(place)}
+          >
             {place.name}
           </h3>
         </div>
@@ -70,7 +85,7 @@ const PlaceCard: React.FC<PlaceCardProps> = ({ place, onVote, onDelete }) => {
             rel="noopener noreferrer"
             className="flex-1 inline-flex justify-center items-center text-slate-600 bg-slate-100 hover:bg-slate-200 hover:text-slate-800 text-sm py-2 px-3 rounded-lg transition-colors"
           >
-            <ExternalLink size={16} className="mr-1" /> รายละเอียด
+            <ExternalLink size={16} className="mr-1" /> เว็บ/เพจ
           </a>
           {place.locationLink && place.locationLink !== '#' && (
             <a 
@@ -96,17 +111,29 @@ const PlaceCard: React.FC<PlaceCardProps> = ({ place, onVote, onDelete }) => {
           <span className="font-semibold text-lg">{place.votes}</span>
         </button>
 
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            onDelete(place.id);
-          }}
-          className="text-red-400 hover:text-red-600 p-2 rounded-full hover:bg-red-50 transition-colors flex items-center gap-1"
-          title="ลบรายการ"
-        >
-          <Trash2 size={18} />
-          <span className="text-sm font-medium">ลบ</span>
-        </button>
+        <div className="flex gap-1">
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onEdit(place);
+            }}
+            className="text-slate-400 hover:text-teal-600 p-2 rounded-full hover:bg-teal-50 transition-colors"
+            title="แก้ไข"
+          >
+            <Edit2 size={18} />
+          </button>
+          
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onDelete(place.id);
+            }}
+            className="text-slate-400 hover:text-red-600 p-2 rounded-full hover:bg-red-50 transition-colors"
+            title="ลบรายการ"
+          >
+            <Trash2 size={18} />
+          </button>
+        </div>
       </div>
     </div>
   );

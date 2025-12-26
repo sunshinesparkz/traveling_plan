@@ -1,13 +1,14 @@
-import React, { useState, useRef } from 'react';
-import { Plus, X, MapPin, Image as ImageIcon, Upload, Loader2, Trash } from 'lucide-react';
+import React, { useState, useRef, useEffect } from 'react';
+import { Plus, X, MapPin, Image as ImageIcon, Upload, Loader2, Save } from 'lucide-react';
 import { Accommodation } from '../types';
 
 interface AddFormProps {
   onAdd: (place: Omit<Accommodation, 'id' | 'votes' | 'addedBy'>) => void;
   onCancel: () => void;
+  initialData?: Accommodation; // Optional prop for editing mode
 }
 
-const AddForm: React.FC<AddFormProps> = ({ onAdd, onCancel }) => {
+const AddForm: React.FC<AddFormProps> = ({ onAdd, onCancel, initialData }) => {
   const [name, setName] = useState('');
   const [price, setPrice] = useState('');
   const [link, setLink] = useState('');
@@ -18,6 +19,23 @@ const AddForm: React.FC<AddFormProps> = ({ onAdd, onCancel }) => {
   const [isProcessingImg, setIsProcessingImg] = useState(false);
   
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Load initial data if editing
+  useEffect(() => {
+    if (initialData) {
+      setName(initialData.name);
+      setPrice(String(initialData.price));
+      setLink(initialData.link);
+      setLocationLink(initialData.locationLink);
+      setNotes(initialData.notes);
+      
+      // Separate uploaded images (base64) from external URLs is hard without a flag,
+      // so we put everything in uploadedImages array for simplicity in display,
+      // or split by string length/pattern if strictly needed. 
+      // For this simple app, let's put existing images in uploadedImages to show previews.
+      setUploadedImages(initialData.images || []);
+    }
+  }, [initialData]);
 
   // Helper to resize and compress image to Base64
   const processImage = (file: File): Promise<string> => {
@@ -97,20 +115,24 @@ const AddForm: React.FC<AddFormProps> = ({ onAdd, onCancel }) => {
       notes
     });
 
-    // Reset form
-    setName('');
-    setPrice('');
-    setLink('');
-    setLocationLink('');
-    setImageUrls('');
-    setUploadedImages([]);
-    setNotes('');
+    // Reset form only if not editing (if editing, the parent usually closes the modal)
+    if (!initialData) {
+        setName('');
+        setPrice('');
+        setLink('');
+        setLocationLink('');
+        setImageUrls('');
+        setUploadedImages([]);
+        setNotes('');
+    }
   };
 
   return (
-    <div className="bg-white rounded-xl shadow-lg border border-teal-100 p-6 mb-8 animate-fade-in-down">
+    <div className={`bg-white rounded-xl shadow-lg border border-teal-100 p-6 mb-8 animate-fade-in-down ${initialData ? 'w-full' : ''}`}>
       <div className="flex justify-between items-center mb-4">
-        <h3 className="text-lg font-bold text-teal-800">เพิ่มที่พักใหม่</h3>
+        <h3 className="text-lg font-bold text-teal-800">
+            {initialData ? 'แก้ไขข้อมูลที่พัก' : 'เพิ่มที่พักใหม่'}
+        </h3>
         <button onClick={onCancel} className="text-slate-400 hover:text-slate-600">
           <X size={20} />
         </button>
@@ -178,7 +200,7 @@ const AddForm: React.FC<AddFormProps> = ({ onAdd, onCancel }) => {
               className="flex items-center gap-2 px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-sm font-medium transition-colors border border-slate-300"
             >
               {isProcessingImg ? <Loader2 className="animate-spin" size={16} /> : <Upload size={16} />}
-              อัปโหลดรูปภาพ
+              {initialData ? 'เพิ่มรูปภาพ' : 'อัปโหลดรูปภาพ'}
             </button>
             <input
               type="file"
@@ -192,7 +214,7 @@ const AddForm: React.FC<AddFormProps> = ({ onAdd, onCancel }) => {
 
           {/* Uploaded Images Preview */}
           {uploadedImages.length > 0 && (
-            <div className="flex gap-2 overflow-x-auto py-2 mb-2">
+            <div className="flex gap-2 overflow-x-auto py-2 mb-2 scrollbar-hide">
               {uploadedImages.map((img, idx) => (
                 <div key={idx} className="relative shrink-0 w-20 h-20 rounded-lg overflow-hidden border border-slate-200 group">
                   <img src={img} alt="preview" className="w-full h-full object-cover" />
@@ -207,13 +229,15 @@ const AddForm: React.FC<AddFormProps> = ({ onAdd, onCancel }) => {
               ))}
             </div>
           )}
-
-          <textarea
-            value={imageUrls}
-            onChange={(e) => setImageUrls(e.target.value)}
-            className="w-full px-4 py-2 rounded-lg border border-slate-300 focus:ring-2 focus:ring-teal-500 outline-none h-20 resize-none text-sm font-mono mt-1"
-            placeholder={`หรือวางลิงก์รูปภาพที่นี่ (บรรทัดละ 1 รูป)...`}
-          />
+          
+          {!initialData && (
+             <textarea
+                value={imageUrls}
+                onChange={(e) => setImageUrls(e.target.value)}
+                className="w-full px-4 py-2 rounded-lg border border-slate-300 focus:ring-2 focus:ring-teal-500 outline-none h-20 resize-none text-sm font-mono mt-1"
+                placeholder={`หรือวางลิงก์รูปภาพที่นี่ (บรรทัดละ 1 รูป)...`}
+             />
+          )}
         </div>
 
         <div>
@@ -230,7 +254,11 @@ const AddForm: React.FC<AddFormProps> = ({ onAdd, onCancel }) => {
           type="submit"
           className="w-full bg-teal-600 hover:bg-teal-700 text-white font-semibold py-2 px-4 rounded-lg shadow-md hover:shadow-lg transition-all flex items-center justify-center gap-2"
         >
-          <Plus size={20} /> บันทึกรายการ
+          {initialData ? (
+            <><Save size={20} /> บันทึกการแก้ไข</>
+          ) : (
+            <><Plus size={20} /> บันทึกรายการ</>
+          )}
         </button>
       </form>
     </div>
