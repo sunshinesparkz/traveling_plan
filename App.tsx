@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Plus, Sparkles, MapPin, Anchor, Share2, CloudLightning, Loader2, Save, Trash2, Settings } from 'lucide-react';
+import { Plus, MapPin, Anchor, Share2, CloudLightning, Loader2, Save, Settings, Sparkles, RotateCcw, X } from 'lucide-react';
 import PlaceCard from './components/PlaceCard';
 import AddForm from './components/AddForm';
 import AiModal from './components/AiModal';
@@ -12,7 +12,7 @@ import { getAccommodationSuggestions } from './services/geminiService';
 import { 
   getTrip, 
   updateTrip, 
-  createTrip,
+  createTrip, 
   subscribeToTrip, 
   isSupabaseConfigured, 
   supabase,
@@ -30,6 +30,11 @@ const App: React.FC = () => {
   // State for Editing and Viewing
   const [editingPlace, setEditingPlace] = useState<Accommodation | null>(null);
   const [viewingPlace, setViewingPlace] = useState<Accommodation | null>(null);
+  
+  // State for Undo
+  const [lastDeleted, setLastDeleted] = useState<Accommodation | null>(null);
+  const [showUndoToast, setShowUndoToast] = useState(false);
+  const undoTimeoutRef = useRef<number | null>(null);
   
   const [isAiLoading, setIsAiLoading] = useState(false);
   const [hasStarted, setHasStarted] = useState(false);
@@ -161,9 +166,35 @@ const App: React.FC = () => {
   };
 
   const handleDelete = (id: string) => {
-    if (window.confirm('ต้องการลบที่พักนี้ออกจากรายการใช่ไหม?')) {
-      setPlaces(prev => prev.filter(p => p.id !== id));
-    }
+    // 1. Find the item
+    const itemToDelete = places.find(p => p.id === id);
+    if (!itemToDelete) return;
+
+    // 2. Save for undo and show toast
+    setLastDeleted(itemToDelete);
+    setShowUndoToast(true);
+
+    // 3. Delete from list
+    setPlaces(prev => prev.filter(p => p.id !== id));
+
+    // 4. Set timer to clear undo capability (5 seconds)
+    if (undoTimeoutRef.current) clearTimeout(undoTimeoutRef.current);
+    undoTimeoutRef.current = window.setTimeout(() => {
+        setShowUndoToast(false);
+        setLastDeleted(null);
+    }, 5000);
+  };
+
+  const handleUndoDelete = () => {
+    if (!lastDeleted) return;
+
+    // Add back to list (put it back at the top for visibility)
+    setPlaces(prev => [lastDeleted, ...prev]);
+    
+    // Clear undo state
+    setShowUndoToast(false);
+    setLastDeleted(null);
+    if (undoTimeoutRef.current) clearTimeout(undoTimeoutRef.current);
   };
 
   const handleVote = (id: string) => {
@@ -311,12 +342,6 @@ const App: React.FC = () => {
               >
                 <Plus size={20} /> เพิ่มที่พักเอง
               </button>
-              <button 
-                onClick={() => setShowAiModal(true)}
-                className="bg-white text-indigo-600 border border-indigo-200 px-6 py-3 rounded-full font-semibold hover:bg-indigo-50 transition shadow-sm flex items-center gap-2"
-              >
-                <Sparkles size={20} /> ให้ AI ช่วยหา
-              </button>
             </div>
           </div>
         )}
@@ -346,12 +371,6 @@ const App: React.FC = () => {
               className="flex-1 sm:flex-none bg-teal-600 hover:bg-teal-700 text-white px-5 py-3 rounded-xl font-semibold shadow-md transition-all flex items-center justify-center gap-2 whitespace-nowrap"
             >
               <Plus size={20} /> จดที่พักใหม่
-            </button>
-            <button 
-              onClick={() => setShowAiModal(true)}
-              className="flex-1 sm:flex-none bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 text-white px-5 py-3 rounded-xl font-semibold shadow-md transition-all flex items-center justify-center gap-2 whitespace-nowrap"
-            >
-              <Sparkles size={18} className="text-yellow-200" /> ให้ AI ช่วยแนะนำเพิ่ม
             </button>
           </div>
         )}
@@ -389,6 +408,26 @@ const App: React.FC = () => {
           ))}
         </div>
       </main>
+
+      {/* Undo Toast */}
+      {showUndoToast && (
+        <div className="fixed bottom-6 left-1/2 transform -translate-x-1/2 bg-slate-800/90 backdrop-blur-md text-white px-6 py-3 rounded-full shadow-2xl flex items-center gap-4 z-50 animate-fade-in-up border border-slate-700">
+            <span className="text-sm">ลบรายการแล้ว</span>
+            <div className="h-4 w-px bg-slate-600 mx-1"></div>
+            <button 
+            onClick={handleUndoDelete}
+            className="text-teal-400 font-bold text-sm flex items-center gap-1 hover:text-teal-300 transition-colors"
+            >
+            <RotateCcw size={16} /> ย้อนกลับ
+            </button>
+            <button 
+            onClick={() => setShowUndoToast(false)}
+            className="text-slate-400 hover:text-white transition-colors ml-2"
+            >
+            <X size={16} />
+            </button>
+        </div>
+      )}
 
       {/* Modals */}
       <AiModal 

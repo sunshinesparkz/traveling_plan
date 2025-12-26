@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { X, MapPin, ExternalLink, ImageOff, ChevronLeft, ChevronRight } from 'lucide-react';
+import { X, MapPin, ExternalLink, ImageOff, ChevronLeft, ChevronRight, Tag } from 'lucide-react';
 import { Accommodation } from '../types';
 
 interface PlaceDetailModalProps {
@@ -13,6 +13,7 @@ const PlaceDetailModal: React.FC<PlaceDetailModalProps> = ({ place, onClose }) =
   if (!place) return null;
 
   const hasImages = place.images && place.images.length > 0;
+  const hasMultiplePrices = place.priceOptions && place.priceOptions.length > 0;
 
   const nextImage = () => {
     if (hasImages) {
@@ -83,10 +84,13 @@ const PlaceDetailModal: React.FC<PlaceDetailModalProps> = ({ place, onClose }) =
                <h2 className="text-2xl sm:text-3xl font-bold text-slate-800 leading-tight mb-2">
                  {place.name}
                </h2>
-               <div className="flex items-center gap-2 text-teal-600 font-semibold text-lg sm:text-xl">
-                 <span>฿{place.price}</span>
-                 <span className="text-slate-400 text-sm font-normal">/ คืน</span>
-               </div>
+               
+               {!hasMultiplePrices && (
+                <div className="flex items-center gap-2 text-teal-600 font-semibold text-lg sm:text-xl">
+                    <span>฿{place.price}</span>
+                    <span className="text-slate-400 text-sm font-normal">/ คืน</span>
+                </div>
+               )}
             </div>
             {place.addedBy === 'ai' && (
                <span className="bg-purple-100 text-purple-700 text-xs px-3 py-1 rounded-full font-bold border border-purple-200">
@@ -94,6 +98,37 @@ const PlaceDetailModal: React.FC<PlaceDetailModalProps> = ({ place, onClose }) =
                </span>
             )}
           </div>
+
+          {/* Multiple Prices Table */}
+          {hasMultiplePrices && (
+            <div className="mb-6">
+                <h3 className="text-sm font-semibold text-slate-700 mb-2 flex items-center gap-2">
+                    <Tag size={16} /> รายละเอียดราคา
+                </h3>
+                <div className="bg-slate-50 rounded-xl border border-slate-200 overflow-hidden">
+                    <table className="w-full text-sm">
+                        <thead className="bg-slate-100 text-slate-600">
+                            <tr>
+                                <th className="px-4 py-2 text-left">ประเภท / ห้อง</th>
+                                <th className="px-4 py-2 text-right">ราคา</th>
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-200">
+                            {place.priceOptions!.map((opt, idx) => (
+                                <tr key={idx} className="hover:bg-white">
+                                    <td className="px-4 py-3 font-medium text-slate-800">
+                                        {opt.label || "-"}
+                                    </td>
+                                    <td className="px-4 py-3 text-right text-teal-600 font-bold">
+                                        ฿{opt.amount}
+                                    </td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+          )}
 
           <div className="prose prose-slate max-w-none mb-8">
             <h3 className="text-lg font-semibold text-slate-700 mb-2">รายละเอียด / บันทึก</h3>

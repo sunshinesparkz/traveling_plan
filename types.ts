@@ -1,7 +1,13 @@
+export interface PriceOption {
+  label: string;
+  amount: string;
+}
+
 export interface Accommodation {
   id: string;
   name: string;
-  price: number | string;
+  price: number | string; // Main display price or starting price
+  priceOptions?: PriceOption[]; // New: Array of price options
   link: string;
   locationLink: string; // New: Google Maps link
   images: string[];     // New: Array of image URLs

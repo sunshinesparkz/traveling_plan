@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Plus, X, MapPin, Image as ImageIcon, Upload, Loader2, Save } from 'lucide-react';
-import { Accommodation } from '../types';
+import { Plus, X, MapPin, Image as ImageIcon, Upload, Loader2, Save, Trash2, Tag } from 'lucide-react';
+import { Accommodation, PriceOption } from '../types';
 
 interface AddFormProps {
   onAdd: (place: Omit<Accommodation, 'id' | 'votes' | 'addedBy'>) => void;
@@ -10,7 +10,7 @@ interface AddFormProps {
 
 const AddForm: React.FC<AddFormProps> = ({ onAdd, onCancel, initialData }) => {
   const [name, setName] = useState('');
-  const [price, setPrice] = useState('');
+  const [priceOptions, setPriceOptions] = useState<PriceOption[]>([{ label: 'ราคาเริ่มต้น', amount: '' }]);
   const [link, setLink] = useState('');
   const [locationLink, setLocationLink] = useState('');
   const [imageUrls, setImageUrls] = useState('');
@@ -24,18 +24,36 @@ const AddForm: React.FC<AddFormProps> = ({ onAdd, onCancel, initialData }) => {
   useEffect(() => {
     if (initialData) {
       setName(initialData.name);
-      setPrice(String(initialData.price));
       setLink(initialData.link);
       setLocationLink(initialData.locationLink);
       setNotes(initialData.notes);
-      
-      // Separate uploaded images (base64) from external URLs is hard without a flag,
-      // so we put everything in uploadedImages array for simplicity in display,
-      // or split by string length/pattern if strictly needed. 
-      // For this simple app, let's put existing images in uploadedImages to show previews.
       setUploadedImages(initialData.images || []);
+
+      if (initialData.priceOptions && initialData.priceOptions.length > 0) {
+        setPriceOptions(initialData.priceOptions);
+      } else {
+        // Fallback for old data
+        setPriceOptions([{ label: 'ราคาเริ่มต้น', amount: String(initialData.price) }]);
+      }
     }
   }, [initialData]);
+
+  // Price Option Handlers
+  const handlePriceChange = (index: number, field: keyof PriceOption, value: string) => {
+    const newOptions = [...priceOptions];
+    newOptions[index] = { ...newOptions[index], [field]: value };
+    setPriceOptions(newOptions);
+  };
+
+  const addPriceOption = () => {
+    setPriceOptions([...priceOptions, { label: '', amount: '' }]);
+  };
+
+  const removePriceOption = (index: number) => {
+    if (priceOptions.length > 1) {
+      setPriceOptions(priceOptions.filter((_, i) => i !== index));
+    }
+  };
 
   // Helper to resize and compress image to Base64
   const processImage = (file: File): Promise<string> => {
@@ -98,6 +116,12 @@ const AddForm: React.FC<AddFormProps> = ({ onAdd, onCancel, initialData }) => {
     e.preventDefault();
     if (!name.trim()) return;
 
+    // Filter valid price options
+    const validPriceOptions = priceOptions.filter(opt => opt.amount.trim() !== '');
+    
+    // Determine main display price (use the first one or lowest)
+    const mainPrice = validPriceOptions.length > 0 ? validPriceOptions[0].amount : 'ไม่ระบุ';
+
     // Combine URLs from textarea and uploaded Base64 images
     const urlImages = imageUrls
       .split('\n')
@@ -108,17 +132,18 @@ const AddForm: React.FC<AddFormProps> = ({ onAdd, onCancel, initialData }) => {
 
     onAdd({
       name,
-      price: price || 'ไม่ระบุ',
+      price: mainPrice,
+      priceOptions: validPriceOptions,
       link: link || '#',
       locationLink: locationLink || '#',
       images: finalImages,
       notes
     });
 
-    // Reset form only if not editing (if editing, the parent usually closes the modal)
+    // Reset form only if not editing
     if (!initialData) {
         setName('');
-        setPrice('');
+        setPriceOptions([{ label: 'ราคาเริ่มต้น', amount: '' }]);
         setLink('');
         setLocationLink('');
         setImageUrls('');
@@ -150,17 +175,50 @@ const AddForm: React.FC<AddFormProps> = ({ onAdd, onCancel, initialData }) => {
           />
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">ราคา (บาท)</label>
-            <input
-              type="text"
-              value={price}
-              onChange={(e) => setPrice(e.target.value)}
-              className="w-full px-4 py-2 rounded-lg border border-slate-300 focus:ring-2 focus:ring-teal-500 outline-none"
-              placeholder="เช่น 1500"
-            />
+        {/* Price Options Section */}
+        <div className="bg-slate-50 p-3 rounded-lg border border-slate-200">
+          <label className="block text-sm font-medium text-slate-700 mb-2 flex items-center gap-1">
+             <Tag size={16} /> ราคาห้องพัก (เพิ่มได้หลายแบบ)
+          </label>
+          <div className="space-y-2">
+            {priceOptions.map((option, index) => (
+              <div key={index} className="flex gap-2 items-center">
+                <input
+                  type="text"
+                  value={option.label}
+                  onChange={(e) => handlePriceChange(index, 'label', e.target.value)}
+                  className="flex-1 min-w-0 px-3 py-2 text-sm rounded-lg border border-slate-300 focus:ring-2 focus:ring-teal-500 outline-none"
+                  placeholder="ประเภท (เช่น วิวทะเล)"
+                />
+                <input
+                  type="text"
+                  value={option.amount}
+                  onChange={(e) => handlePriceChange(index, 'amount', e.target.value)}
+                  className="w-28 px-3 py-2 text-sm rounded-lg border border-slate-300 focus:ring-2 focus:ring-teal-500 outline-none"
+                  placeholder="ราคา"
+                />
+                {priceOptions.length > 1 && (
+                  <button
+                    type="button"
+                    onClick={() => removePriceOption(index)}
+                    className="p-2 text-slate-400 hover:text-red-500 transition-colors"
+                  >
+                    <Trash2 size={16} />
+                  </button>
+                )}
+              </div>
+            ))}
           </div>
+          <button
+            type="button"
+            onClick={addPriceOption}
+            className="mt-2 text-xs font-semibold text-teal-600 hover:text-teal-700 flex items-center gap-1"
+          >
+            <Plus size={14} /> เพิ่มราคาอีก
+          </button>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-1">เว็บไซต์ / Facebook Page</label>
             <input
@@ -171,19 +229,18 @@ const AddForm: React.FC<AddFormProps> = ({ onAdd, onCancel, initialData }) => {
               placeholder="https://..."
             />
           </div>
-        </div>
-
-        <div>
-          <label className="block text-sm font-medium text-slate-700 mb-1 flex items-center gap-1">
-            <MapPin size={16} /> ลิงก์ Google Maps
-          </label>
-          <input
-            type="text"
-            value={locationLink}
-            onChange={(e) => setLocationLink(e.target.value)}
-            className="w-full px-4 py-2 rounded-lg border border-slate-300 focus:ring-2 focus:ring-teal-500 outline-none"
-            placeholder="https://maps.app.goo.gl/..."
-          />
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1 flex items-center gap-1">
+              <MapPin size={16} /> ลิงก์ Google Maps
+            </label>
+            <input
+              type="text"
+              value={locationLink}
+              onChange={(e) => setLocationLink(e.target.value)}
+              className="w-full px-4 py-2 rounded-lg border border-slate-300 focus:ring-2 focus:ring-teal-500 outline-none"
+              placeholder="https://maps.app.goo.gl/..."
+            />
+          </div>
         </div>
 
         <div>

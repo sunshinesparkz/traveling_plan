@@ -11,6 +11,28 @@ interface PlaceCardProps {
 }
 
 const PlaceCard: React.FC<PlaceCardProps> = ({ place, onVote, onDelete, onEdit, onView }) => {
+  
+  // Logic to display price range
+  const getDisplayPrice = () => {
+    if (place.priceOptions && place.priceOptions.length > 1) {
+      // Try to parse numbers from strings to find min/max
+      const prices = place.priceOptions
+        .map(opt => parseInt(opt.amount.replace(/[^0-9]/g, '')))
+        .filter(n => !isNaN(n));
+      
+      if (prices.length > 0) {
+        const min = Math.min(...prices);
+        const max = Math.max(...prices);
+        if (min !== max) {
+          return `฿${min.toLocaleString()} - ${max.toLocaleString()}`;
+        }
+        return `฿${min.toLocaleString()}`;
+      }
+    }
+    // Fallback or single price
+    return `฿${place.price}`;
+  };
+
   return (
     <div className="bg-white rounded-xl shadow-md overflow-hidden hover:shadow-lg transition-all duration-300 border border-slate-100 flex flex-col h-full group relative">
       
@@ -70,7 +92,7 @@ const PlaceCard: React.FC<PlaceCardProps> = ({ place, onVote, onDelete, onEdit, 
         </div>
         
         <div className="flex items-center text-teal-600 font-medium mb-3">
-          <span className="text-lg">฿{place.price}</span>
+          <span className="text-lg">{getDisplayPrice()}</span>
           <span className="text-slate-400 text-sm ml-1">/ คืน</span>
         </div>
 
