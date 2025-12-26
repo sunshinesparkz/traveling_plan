@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
-import { X, Cloud, Link as LinkIcon, Download, Check, AlertTriangle } from 'lucide-react';
+import { X, Cloud, Link as LinkIcon, Check, QrCode } from 'lucide-react';
 import { Accommodation, TripDetails } from '../types';
-import { isSupabaseConfigured, createTrip } from '../services/supabaseService';
 
 interface ShareModalProps {
   isOpen: boolean;
@@ -12,32 +11,10 @@ interface ShareModalProps {
   onTripCreated: (id: string) => void;
 }
 
-const ShareModal: React.FC<ShareModalProps> = ({ isOpen, onClose, places, tripDetails, currentTripId, onTripCreated }) => {
-  const [isCreating, setIsCreating] = useState(false);
+const ShareModal: React.FC<ShareModalProps> = ({ isOpen, onClose, currentTripId }) => {
   const [copySuccess, setCopySuccess] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
   if (!isOpen) return null;
-
-  const handleCreateCloudLink = async () => {
-    setIsCreating(true);
-    setError(null);
-    try {
-      if (!isSupabaseConfigured) {
-        throw new Error("ยังไม่ได้ตั้งค่า Database (Supabase Keys)");
-      }
-      
-      const data = await createTrip(places, tripDetails);
-      if (data && data.id) {
-        onTripCreated(data.id);
-      }
-    } catch (err: any) {
-      console.error(err);
-      setError(err.message || "เกิดข้อผิดพลาดในการสร้างลิงก์");
-    } finally {
-      setIsCreating(false);
-    }
-  };
 
   const handleCopyLink = () => {
     const url = window.location.href;
@@ -45,24 +22,6 @@ const ShareModal: React.FC<ShareModalProps> = ({ isOpen, onClose, places, tripDe
       setCopySuccess(true);
       setTimeout(() => setCopySuccess(false), 2000);
     });
-  };
-
-  const handleDownloadJson = () => {
-    const exportData = {
-      places,
-      details: tripDetails,
-      exportDate: new Date().toISOString()
-    };
-    
-    const dataStr = JSON.stringify(exportData, null, 2);
-    const blob = new Blob([dataStr], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `kohlarn-plan-${new Date().toISOString().split('T')[0]}.json`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
   };
 
   return (
@@ -74,75 +33,47 @@ const ShareModal: React.FC<ShareModalProps> = ({ isOpen, onClose, places, tripDe
 
         <div className="p-6">
           <h2 className="text-2xl font-bold text-slate-800 mb-2 flex items-center gap-2">
-            <Cloud className="text-teal-500" /> แชร์ทริป
+            <Cloud className="text-teal-500" /> แชร์ทริปให้เพื่อน
           </h2>
-          <p className="text-slate-500 mb-6 text-sm">เลือกวิธีที่คุณต้องการเก็บข้อมูลหรือแชร์ให้เพื่อน</p>
+          <p className="text-slate-500 mb-6 text-sm">
+            ส่งลิงก์นี้ให้เพื่อนเพื่อดูและแก้ไขรายการที่พักร่วมกัน (Real-time)
+          </p>
 
           <div className="space-y-4">
-            {/* Option 1: Cloud Link */}
             <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
               <h3 className="font-semibold text-slate-700 mb-2 flex items-center gap-2">
-                <LinkIcon size={18} /> ลิงก์ออนไลน์ (Cloud)
+                <LinkIcon size={18} /> ลิงก์สำหรับแชร์
               </h3>
               
               {currentTripId ? (
                 <div className="space-y-2">
-                  <div className="text-xs text-green-600 font-medium flex items-center gap-1">
-                    <Check size={14} /> ข้อมูลอยู่บน Cloud แล้ว
-                  </div>
                   <div className="flex gap-2">
                     <input 
                       readOnly 
                       value={window.location.href} 
-                      className="w-full text-xs bg-white border border-slate-300 rounded px-2 py-2 text-slate-600 truncate"
+                      className="w-full text-sm bg-white border border-slate-300 rounded-lg px-3 py-2 text-slate-600 truncate focus:outline-none focus:ring-2 focus:ring-teal-500"
                     />
                     <button 
                       onClick={handleCopyLink}
-                      className={`px-3 py-1 rounded text-xs font-bold transition-colors ${copySuccess ? 'bg-green-500 text-white' : 'bg-slate-800 text-white hover:bg-slate-900'}`}
+                      className={`px-4 py-2 rounded-lg text-sm font-bold transition-all whitespace-nowrap ${copySuccess ? 'bg-green-500 text-white shadow-green-200' : 'bg-slate-800 text-white hover:bg-slate-900 shadow-lg'}`}
                     >
                       {copySuccess ? 'คัดลอกแล้ว' : 'คัดลอก'}
                     </button>
                   </div>
-                  <p className="text-xs text-slate-400 mt-1">
-                    *ส่งลิงก์นี้ให้เพื่อนเพื่อแก้ไขข้อมูลร่วมกัน
-                  </p>
+                  <div className="flex items-center gap-1 text-xs text-green-600 mt-2">
+                     <Check size={12} /> ข้อมูลถูกบันทึกบน Cloud เรียบร้อยแล้ว
+                  </div>
                 </div>
               ) : (
-                <div>
-                   {error && (
-                    <div className="text-xs text-red-500 bg-red-50 p-2 rounded mb-2 flex items-center gap-1">
-                      <AlertTriangle size={14} /> {error}
-                    </div>
-                  )}
-                  {!isSupabaseConfigured && (
-                     <div className="text-xs text-amber-600 bg-amber-50 p-2 rounded mb-2">
-                       ต้องตั้งค่า Supabase API Key ในไฟล์ .env ก่อนใช้งานฟีเจอร์นี้
-                     </div>
-                  )}
-                  <button
-                    onClick={handleCreateCloudLink}
-                    disabled={isCreating || !isSupabaseConfigured}
-                    className="w-full bg-teal-600 hover:bg-teal-700 disabled:bg-slate-300 text-white py-2 rounded-lg font-medium text-sm transition-colors flex justify-center items-center gap-2"
-                  >
-                    {isCreating ? 'กำลังสร้าง...' : 'สร้างลิงก์สำหรับแชร์'}
-                  </button>
+                <div className="text-center py-4 text-slate-500 text-sm">
+                    กรุณาเพิ่มที่พักอย่างน้อย 1 รายการเพื่อเริ่มสร้างทริป
                 </div>
               )}
             </div>
-
-            <div className="relative flex py-1 items-center">
-                <div className="flex-grow border-t border-slate-200"></div>
-                <span className="flex-shrink mx-4 text-slate-400 text-xs">หรือ</span>
-                <div className="flex-grow border-t border-slate-200"></div>
-            </div>
-
-            {/* Option 2: File Download */}
-            <button 
-              onClick={handleDownloadJson}
-              className="w-full bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 py-3 rounded-xl font-medium text-sm transition-colors flex items-center justify-center gap-2"
-            >
-              <Download size={18} /> ดาวน์โหลดไฟล์ (Backup)
-            </button>
+            
+             <div className="text-center text-xs text-slate-400">
+                * ใครที่มีลิงก์นี้สามารถแก้ไขข้อมูลได้
+             </div>
           </div>
         </div>
       </div>
