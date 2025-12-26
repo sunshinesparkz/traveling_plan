@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { Plus, Sparkles, MapPin, Anchor, Trash2, Share2, CloudLightning } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Plus, Sparkles, MapPin, Anchor, Trash2, Share2, CloudLightning, Loader2 } from 'lucide-react';
 import PlaceCard from './components/PlaceCard';
 import AddForm from './components/AddForm';
 import AiModal from './components/AiModal';
@@ -18,19 +18,26 @@ const App: React.FC = () => {
   const [showShareModal, setShowShareModal] = useState(false);
   const [isAiLoading, setIsAiLoading] = useState(false);
   const [hasStarted, setHasStarted] = useState(false);
+  
   const [tripId, setTripId] = useState<string | null>(null);
   const [isSyncing, setIsSyncing] = useState(false);
+  const [isCloudLoaded, setIsCloudLoaded] = useState(false); // New: Prevents overwriting cloud data on initial load
+  const [isLoadingTrip, setIsLoadingTrip] = useState(false); // New: Shows loading spinner for trip data
 
   // Parse URL query params on mount
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const urlTripId = params.get('tripId');
+    
     if (urlTripId) {
       setTripId(urlTripId);
       setHasStarted(true);
       loadCloudTrip(urlTripId);
     } else {
-      // Load from local storage only if no Trip ID in URL
+      // Local mode: Load from local storage
+      // We set isCloudLoaded to true immediately because we aren't waiting for cloud data
+      setIsCloudLoaded(true); 
+      
       const savedPlaces = localStorage.getItem('kohlarn-places');
       const savedDetails = localStorage.getItem('kohlarn-details');
       
@@ -52,8 +59,12 @@ const App: React.FC = () => {
   }, []);
 
   const loadCloudTrip = async (id: string) => {
-    if (!isSupabaseConfigured) return;
-    setIsSyncing(true);
+    if (!isSupabaseConfigured) {
+      setIsCloudLoaded(true); // Fallback to allow local editing
+      return;
+    }
+    
+    setIsLoadingTrip(true);
     try {
       const data = await getTrip(id);
       if (data) {
@@ -62,16 +73,21 @@ const App: React.FC = () => {
       }
     } catch (error) {
       console.error("Error loading trip:", error);
-      alert("ไม่สามารถโหลดข้อมูลทริปได้ (อาจจะไม่มีอยู่จริงหรือระบบขัดข้อง)");
+      alert("ไม่สามารถโหลดข้อมูลทริปได้ หรือลิงก์ไม่ถูกต้อง");
     } finally {
-      setIsSyncing(false);
+      setIsLoadingTrip(false);
+      // CRITICAL: Only allow syncing AFTER we have finished loading
+      setIsCloudLoaded(true); 
     }
   };
 
   // Sync Logic
   useEffect(() => {
-    // If we have a tripId, sync to cloud
-    if (tripId && isSupabaseConfigured && places.length >= 0) {
+    // Only sync if:
+    // 1. We have a tripId (Cloud mode)
+    // 2. Supabase is configured
+    // 3. Cloud data has finished loading (Prevention of race condition)
+    if (tripId && isSupabaseConfigured && isCloudLoaded) {
       const timer = setTimeout(async () => {
         setIsSyncing(true);
         try {
@@ -84,8 +100,10 @@ const App: React.FC = () => {
       }, 2000); // Debounce 2 seconds
 
       return () => clearTimeout(timer);
-    } else {
-      // If local mode, save to localStorage
+    } 
+    
+    // Local Storage Logic (Only if NOT in cloud mode)
+    if (!tripId && isCloudLoaded) {
       try {
         localStorage.setItem('kohlarn-places', JSON.stringify(places));
         if (tripDetails) {
@@ -95,10 +113,13 @@ const App: React.FC = () => {
          // Quota error handling
       }
     }
-  }, [places, tripDetails, tripId]);
+  }, [places, tripDetails, tripId, isCloudLoaded]);
 
   const handleTripCreated = (newId: string) => {
     setTripId(newId);
+    // Since we just created it, we are "loaded" and in sync
+    setIsCloudLoaded(true); 
+    
     // Update URL without reload
     const newUrl = `${window.location.pathname}?tripId=${newId}`;
     window.history.pushState({ path: newUrl }, '', newUrl);
@@ -141,7 +162,6 @@ const App: React.FC = () => {
 
   const handleAiSearch = async (params: AiSuggestionParams) => {
     setIsAiLoading(true);
-    // Save the search parameters as trip details
     setTripDetails(params);
     
     try {
@@ -155,6 +175,15 @@ const App: React.FC = () => {
       setIsAiLoading(false);
     }
   };
+
+  if (isLoadingTrip) {
+    return (
+      <div className="fixed inset-0 bg-slate-50 flex flex-col items-center justify-center z-50">
+        <Loader2 className="animate-spin text-teal-600 mb-4" size={48} />
+        <p className="text-slate-600 font-medium">กำลังดึงข้อมูลทริป...</p>
+      </div>
+    );
+  }
 
   if (!hasStarted) {
     return <WelcomeScreen onStart={() => setHasStarted(true)} />;
