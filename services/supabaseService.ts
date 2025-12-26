@@ -1,9 +1,11 @@
 import { createClient } from '@supabase/supabase-js';
 import { Accommodation } from '../types';
 
-const env = (import.meta as any).env;
-const supabaseUrl = env.VITE_SUPABASE_URL || '';
-const supabaseKey = env.VITE_SUPABASE_ANON_KEY || '';
+// process.env is defined in vite.config.ts
+declare const process: any;
+
+const supabaseUrl = process.env.VITE_SUPABASE_URL || (import.meta as any).env?.VITE_SUPABASE_URL || '';
+const supabaseKey = process.env.VITE_SUPABASE_ANON_KEY || (import.meta as any).env?.VITE_SUPABASE_ANON_KEY || '';
 
 export const isSupabaseConfigured = !!(supabaseUrl && supabaseKey);
 
