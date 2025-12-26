@@ -50,22 +50,39 @@ const App: React.FC = () => {
   useEffect(() => {
     const init = async () => {
       const params = new URLSearchParams(window.location.search);
-      const urlTripId = params.get('tripId');
+      let urlTripId = params.get('tripId');
       
+      // AUTO-RESTORE LOGIC:
+      // If no tripId in URL, try to find the last visited trip from LocalStorage
+      if (!urlTripId && isSupabaseConfigured) {
+        const lastVisitedId = localStorage.getItem('kohlarn_last_trip_id');
+        if (lastVisitedId) {
+            console.log("Restoring last visited trip:", lastVisitedId);
+            urlTripId = lastVisitedId;
+            // Silently update URL to include the ID so sharing works correctly
+            const newUrl = `${window.location.pathname}?tripId=${lastVisitedId}`;
+            window.history.replaceState(null, '', newUrl);
+        }
+      }
+
       if (urlTripId && isSupabaseConfigured) {
         setIsLoadingTrip(true);
         setTripId(urlTripId);
-        setHasStarted(true); // Auto start if coming from link
+        setHasStarted(true); // Auto start if coming from link or restore
         
         try {
           const data = await getTrip(urlTripId);
           if (data) {
             if (data.places) setPlaces(data.places);
             if (data.trip_details) setTripDetails(data.trip_details);
+            // Confirm this is the active trip in storage
+            localStorage.setItem('kohlarn_last_trip_id', urlTripId);
           }
         } catch (error) {
           console.error("Error loading trip:", error);
           alert("ไม่สามารถโหลดข้อมูลทริปได้ หรือลิงก์ไม่ถูกต้อง");
+          // If load fails (e.g. deleted), maybe clear the bad ID
+          // localStorage.removeItem('kohlarn_last_trip_id'); 
         } finally {
           setIsLoadingTrip(false);
         }
@@ -124,8 +141,10 @@ const App: React.FC = () => {
          const newTrip = await createTrip(places, tripDetails);
          if (newTrip) {
             setTripId(newTrip.id);
+            // Update URL and LocalStorage
             const newUrl = `${window.location.pathname}?tripId=${newTrip.id}`;
             window.history.pushState({ path: newUrl }, '', newUrl);
+            localStorage.setItem('kohlarn_last_trip_id', newTrip.id);
             return newTrip.id;
          }
        } catch (e) {
@@ -220,11 +239,13 @@ const App: React.FC = () => {
     }
   };
 
+  // REMOVED: handleClearAll button logic from UI, but function kept if needed internally
   const handleClearAll = async () => {
     if (window.confirm('ต้องการสร้างทริปใหม่? (ลิงก์เดิมจะยังใช้งานได้ แต่หน้าจอจะถูกเคลียร์)')) {
       setPlaces([]);
       setTripDetails(null);
       setTripId(null);
+      localStorage.removeItem('kohlarn_last_trip_id'); // Clear last trip
       window.history.pushState({ path: '/' }, '', '/');
     }
   };
@@ -297,15 +318,7 @@ const App: React.FC = () => {
                 <Share2 size={18} /> <span className="hidden sm:inline">แชร์ทริป</span>
               </button>
 
-            {places.length > 0 && (
-              <button
-                onClick={handleClearAll}
-                className="text-slate-400 hover:text-teal-600 p-2 rounded-full hover:bg-teal-50 transition-colors"
-                title="เริ่มทริปใหม่"
-              >
-                <Plus size={20} />
-              </button>
-            )}
+            {/* REMOVED: Create New Trip Button as requested */}
 
             <button 
                 onClick={() => {
